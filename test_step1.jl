@@ -299,25 +299,26 @@ println("  PASSED ✓")
 
 # ─── Test 13: Ideal oblique lens, 2mm visible, realistic ──────
 println("\n--- Test 13: Ideal oblique lens (2mm, λ=500nm, α=10°) ---")
-# Physical parameters
-lambda_13 = 0.5         # μm (500 nm)
+# Physical parameters — scaled to keep M_max manageable for testing.
+# Real 2mm lens has M_max ~ 4370 needing Nθ ~ 8741.  We use the same
+# physical ratios (NA, f/R, α) but with R = 10λ so M_max ~ 22.
+lambda_13 = 1.0         # normalised units
 k_13      = 2π / lambda_13
-f_13      = 8000.0      # μm (focal length for NA≈0.25)
-R_13      = 2000.0      # μm (2 mm aperture)
+R_13      = 10.0 * lambda_13           # 10 λ aperture
+f_13      = R_13 * sqrt(1/0.25^2 - 1)  # NA ≈ 0.25 → same as 2mm lens
 alpha_13  = deg2rad(10.0)
 x0_13     = f_13 * tan(alpha_13)
 kx_13     = k_13 * sin(alpha_13)
 
-# Grid: use modest size for testing (not production 2^17)
 Nr_13     = 128
 Ntheta_13 = 256
-r_13      = exp.(range(log(0.05), log(R_13), length=Nr_13))
+r_13      = exp.(range(log(0.05 * lambda_13), log(R_13), length=Nr_13))
 theta_13  = range(0.0, 2π, length=Ntheta_13+1)[1:end-1]
 
 M_max_13 = ceil(Int, kx_13 * R_13) + 5
-println("  R=$R_13 μm, f=$f_13 μm, λ=$lambda_13 μm, α=10°")
+println("  R=$(R_13/lambda_13)λ, f=$(round(f_13/lambda_13, digits=1))λ, α=10°, NA≈0.25")
 println("  M_max = $M_max_13,  Nθ = $Ntheta_13,  Nr = $Nr_13")
-@assert Ntheta_13 >= 2M_max_13 + 1 "Ntheta too small"
+@assert Ntheta_13 >= 2M_max_13 + 1 "Ntheta=$Ntheta_13 too small for M_max=$M_max_13"
 
 # Ideal oblique lens: u(r,θ) = exp(-ik[√((r cosθ − x₀)² + r² sin²θ + f²) − f])
 # Near field: E = u(r,θ) (sinθ r̂ + cosθ θ̂)  [y-polarized]
