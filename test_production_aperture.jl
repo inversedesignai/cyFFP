@@ -266,7 +266,7 @@ end
 
 println("  Running graf_shift with M_test=$M_test, L_max=$L_max_prod...")
 t_graf = @elapsed begin
-    B_prod = graf_shift(A_tilde_test, m_full_test, collect(kr), x0_prod, L_max_prod)
+    B_prod = graf_shift(A_tilde_test, m_full_test, collect(kr), x0_prod, L_max_prod; k=k)
 end
 println("  Done in $(round(t_graf, digits=2)) s")
 

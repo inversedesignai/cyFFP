@@ -344,9 +344,14 @@ end
 """
     _besselj_range(m_max, x) -> Vector{Float64}
 
-Compute J_0(x), J_1(x), ..., J_{m_max}(x).
-Uses Miller backward recurrence for moderate x (fast, ~10× vs individual calls).
-Falls back to individual besselj calls for large x (where recurrence overflows).
+Compute J_0(x), J_1(x), ..., J_{m_max}(x) via Miller backward recurrence
+with overflow protection.  Works for ANY x (no fallback to individual
+besselj calls).
+
+Uses the self-normalizing identity: 1 = J_0(x) + 2[J_2(x) + J_4(x) + ...]
+to avoid needing besselj(0, x) for normalization.
+
+~10× faster than individual besselj calls at all x.
 """
 function _besselj_range(m_max::Int, x::Float64)
     if m_max < 0; return Float64[]; end
@@ -356,42 +361,55 @@ function _besselj_range(m_max::Int, x::Float64)
         return out
     end
 
-    # For large x, the Miller recurrence overflows (intermediate values
-    # reach ~2^x before normalization).  Fall back to direct computation.
-    if abs(x) > 500.0 || m_max > 500
-        out = Vector{Float64}(undef, m_max + 1)
-        for m in 0:m_max
-            out[m + 1] = besselj(m, x)
-        end
-        return out
-    end
-
-    # Miller backward recurrence: must start ABOVE both m_max and x.
+    # Start above both m_max and the turning point |x|.
     m_start = max(m_max, ceil(Int, abs(x))) + max(30, ceil(Int, 15 * sqrt(max(1.0, abs(x)))))
-    jnp1 = 0.0
-    jn   = 1.0
-    out  = zeros(Float64, m_max + 1)
+
+    jnp1     = 0.0
+    jn       = 1.0
+    out      = zeros(Float64, m_max + 1)
+    norm_sum = 0.0   # accumulates J_0 + 2(J_2 + J_4 + ...)
+
     for m in m_start:-1:0
-        # Recurrence: J_{m-1}(x) = (2m/x) J_m(x) - J_{m+1}(x)
         jnm1 = (2m / x) * jn - jnp1
+
         if m <= m_max
             out[m + 1] = jn
         end
+
+        # Accumulate normalization identity: 1 = J_0 + 2Σ_{k≥1} J_{2k}
+        if m == 0
+            norm_sum += jn
+        elseif iseven(m)
+            norm_sum += 2 * jn
+        end
+
         jnp1 = jn
         jn   = jnm1
+
+        # Overflow protection: rescale ALL accumulated values by the same
+        # factor.  This preserves ratios (the normalization divides out).
+        if abs(jn) > 1e200
+            jn       *= 1e-200
+            jnp1     *= 1e-200
+            norm_sum *= 1e-200
+            out      .*= 1e-200
+        end
     end
-    # Normalize using J_0 from the standard library
-    scale = besselj(0, x) / out[1]
-    out .*= scale
+
+    # Normalize: out[j] / norm_sum gives the true J_m(x)
+    out ./= norm_sum
     return out
 end
 
 """
-    graf_shift(A_tilde, m_full, kr_grid, x0, L_max) -> B[Nkr, 2L_max+1]
+    graf_shift(A_tilde, m_full, kr_grid, x0, L_max; k=Inf) -> B[Nkr, 2L_max+1]
 
 Apply Graf's addition theorem at every kr point:
     B_l(kr) = Σ_m Ã_{m+l}(kr) J_m(kr x₀)
 for |l| ≤ L_max.
+
+If `k` is provided, evanescent kr points (kr > k) are skipped
+(A_tilde is zero there from Step 3, so B = 0 automatically).
 
 # Arguments
 - `A_tilde[Nkr, 2M_max+1]`: propagated coefficients (m = -M_max:M_max)
@@ -399,6 +417,7 @@ for |l| ≤ L_max.
 - `kr_grid`: log-spaced kr grid
 - `x0`: lateral shift = f tan(α)
 - `L_max`: local mode truncation
+- `k`: wavenumber (optional; enables evanescent skip)
 
 # Returns
 - `B[Nkr, 2L_max+1]`: local modal coefficients, columns = l = -L_max:L_max
@@ -407,21 +426,26 @@ function graf_shift(A_tilde::Matrix{ComplexF64},
                      m_full::Vector{Int},
                      kr_grid::Vector{Float64},
                      x0::Float64,
-                     L_max::Int)
+                     L_max::Int;
+                     k::Float64 = Inf)
     M_max = (length(m_full) - 1) ÷ 2
     Nkr   = length(kr_grid)
     Nl    = 2L_max + 1
     B     = zeros(ComplexF64, Nkr, Nl)
 
-    # Warm FFTW cache not needed here — no FFT calls.
     # Thread over kr points (each is independent).
     Threads.@threads for ikr in 1:Nkr
+        # Skip evanescent: A_tilde = 0 for kr > k (from Step 3)
+        if kr_grid[ikr] > k
+            continue   # B[ikr, :] stays zero
+        end
+
         kr_x0 = kr_grid[ikr] * x0
 
         # Bessel truncation: J_m(z) ≈ 0 for |m| > z + buffer
         m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
 
-        # Compute J_0..J_{m_cut} via fast recurrence
+        # Compute J_0..J_{m_cut} via overflow-safe recurrence
         Jp = _besselj_range(m_cut, kr_x0)
 
         # Build full Bessel weight vector for m = -m_cut:m_cut
