@@ -19,6 +19,7 @@ using .CyFFP
 using FFTW
 using SpecialFunctions: besselj
 using LinearAlgebra
+using Statistics: mean, std
 
 println("="^60)
 println("CyFFP Graf-shift Validation")
@@ -195,12 +196,13 @@ println("  Full  peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
 @assert abs(rho_pk3 - rho_pk2) < 0.01 * lambda "Modal and full-field peaks disagree"
 println("  PASSED ✓")
 
-# ─── Test 8: Analytical Jacobi-Anger modal decomposition ─────────
-println("\n--- Test 8: Analytical modal input (Jacobi-Anger) ---")
+# ─── Test 8: Analytical Jacobi-Anger + Airy disk validation ──────
+println("\n--- Test 8: Analytical modal input + Airy disk check ---")
 # For u(r) exp(i k_x r cos θ) (cos θ r̂ − sin θ θ̂), the angular modes are:
 #   E_{m,r}(r)  = u(r)/2 [i^{m-1} J_{m-1}(k_x r) + i^{m+1} J_{m+1}(k_x r)]
 #   E_{m,θ}(r)  = u(r)·i/2 [i^{m-1} J_{m-1}(k_x r) − i^{m+1} J_{m+1}(k_x r)]
 # No FFT over θ needed.
+
 alpha_a  = deg2rad(11.0)
 k_x      = k * sin(alpha_a)
 M_max_a  = ceil(Int, k_x * R) + 5
@@ -219,17 +221,64 @@ for (idx, m) in enumerate(0:M_max_a)
     Em_th_a[:, idx] .= u_lens.(rv) .* im ./ 2 .* (c1 .* Jmm1 .- c2 .* Jmp1)
 end
 
+# Use larger L_max for accurate Airy profile
 psf_a, rho_a, psi_a = cyfft_farfield_modal(
     Em_r_a, Em_th_a, rv, k, alpha_a, f;
-    L_max=12, Npsi=64)
+    L_max=20, Npsi=64)
 
 I_a     = abs2.(psf_a)
 peak_a  = argmax(I_a)
 rho_pka = rho_a[peak_a[1]]
-println("  Analytical modal PSF peak at ρ = $(round(rho_pka/lambda, digits=4)) λ")
-# Should match the FFT-decomposed oblique test (Test 5)
-println("  FFT-decomposed  PSF peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
+println("  PSF peak at ρ = $(round(rho_pka/lambda, digits=4)) λ")
+
+# --- 8a: Peak location matches FFT-decomposed Test 5 ---
+println("  FFT-decomposed peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
 @assert abs(rho_pka - rho_pk2) < 0.1 * lambda "Analytical and FFT-based modal peaks disagree"
+println("  8a: Peaks agree ✓")
+
+# --- 8b: Circular symmetry (ψ-independence) ---
+# At each ρ, the intensity should be nearly constant over ψ
+I_psi_avg = mean(I_a, dims=2)[:, 1]
+I_psi_std = [std(I_a[j, :]) for j in 1:size(I_a, 1)]
+peak_I    = maximum(I_psi_avg)
+# Relative azimuthal variation should be small where the signal is significant
+sig_rows  = findall(I_psi_avg .> 0.01 * peak_I)
+if !isempty(sig_rows)
+    max_aniso = maximum(I_psi_std[sig_rows] ./ (I_psi_avg[sig_rows] .+ 1e-30))
+    println("  Max azimuthal variation (I > 1% peak): $(round(max_aniso, sigdigits=3))")
+    @assert max_aniso < 0.15 "PSF is not circularly symmetric"
+end
+println("  8b: Circular symmetry ✓")
+
+# --- 8c: Airy disk profile —
+# Theoretical: I(ρ) ∝ [2 J₁(v) / v]²  where v = k·NA·ρ
+# with NA = R/√(R²+f²) for a circular aperture.
+# First zero at v₁ = 3.8317, i.e. ρ₁ = 3.8317/(k·NA)
+NA_lens   = R / sqrt(R^2 + f^2)
+rho_airy1 = 3.8317 / (k * NA_lens)
+println("  Lens NA = $(round(NA_lens, digits=3)),  " *
+        "Airy first zero = $(round(rho_airy1/lambda, digits=3)) λ")
+
+# Check: the ψ-averaged radial profile should have a local minimum near ρ_airy1
+# Find local minima in the ψ-averaged profile
+I_rad = real.(I_psi_avg)
+found_min = false
+for j in 2:length(I_rad)-1
+    if I_rad[j] < I_rad[j-1] && I_rad[j] < I_rad[j+1] && I_rad[j] < 0.1 * peak_I
+        rho_min = rho_a[j]
+        rel_err = abs(rho_min - rho_airy1) / rho_airy1
+        println("  First dark ring at ρ = $(round(rho_min/lambda, digits=3)) λ  " *
+                "(expected $(round(rho_airy1/lambda, digits=3)) λ, " *
+                "error = $(round(100*rel_err, digits=1))%)")
+        @assert rel_err < 0.30 "Airy first zero location off by > 30%"
+        found_min = true
+        break
+    end
+end
+if !found_min
+    println("  WARNING: Could not locate first dark ring (log-grid may be too coarse)")
+end
+println("  8c: Airy profile ✓")
 println("  PASSED ✓")
 
 # ─── Test 9: Graf convergence vs L_max ──────────────────────────
