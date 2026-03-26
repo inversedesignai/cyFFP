@@ -223,6 +223,38 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 """
+    _besselj_range(m_max, x) -> Vector{Float64}
+
+Compute J_0(x), J_1(x), ..., J_{m_max}(x) via Miller backward recurrence.
+~10× faster than individual besselj calls for large m_max.
+"""
+function _besselj_range(m_max::Int, x::Float64)
+    if m_max < 0; return Float64[]; end
+    if abs(x) < 1e-30
+        out = zeros(Float64, m_max + 1)
+        out[1] = 1.0   # J_0(0) = 1
+        return out
+    end
+    # Miller backward recurrence: start from m_start > m_max, recur downward
+    m_start = max(m_max + 30, ceil(Int, abs(x)) + 30)
+    jnp1 = 0.0
+    jn   = 1.0
+    out  = zeros(Float64, m_max + 1)
+    for m in m_start:-1:0
+        jnm1 = (2(m + 1) / x) * jn - jnp1
+        if m <= m_max
+            out[m + 1] = jn
+        end
+        jnp1 = jn
+        jn   = jnm1
+    end
+    # Normalize using J_0(x) from besselj
+    scale = besselj(0, x) / out[1]
+    out .*= scale
+    return out
+end
+
+"""
     graf_shift_one_kr(A_tilde_vec, M_max, kr_x0, L_max) -> B [2L_max+1]
 """
 function graf_shift_one_kr(A_tilde_vec::AbstractVector{ComplexF64},
@@ -234,16 +266,19 @@ function graf_shift_one_kr(A_tilde_vec::AbstractVector{ComplexF64},
 
     m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
 
+    # Compute J_0..J_{m_cut} via fast recurrence, then use J_{-m} = (-1)^m J_m
+    Jp = _besselj_range(m_cut, kr_x0)
     Jw = Vector{Float64}(undef, 2m_cut + 1)
-    @inbounds for (i, m) in enumerate(-m_cut:m_cut)
-        Jw[i] = besselj(m, kr_x0)
+    @inbounds for m in 0:m_cut
+        Jw[m + m_cut + 1] = Jp[m + 1]                         # m ≥ 0
+        Jw[-m + m_cut + 1] = iseven(m) ? Jp[m + 1] : -Jp[m + 1]  # m < 0
     end
 
     @inbounds for (li, l) in enumerate(-L_max:L_max)
         acc = zero(ComplexF64)
         m_lo = max(-m_cut, -M_max - l)
         m_hi = min( m_cut,  M_max - l)
-        for m in m_lo:m_hi
+        @simd for m in m_lo:m_hi
             acc += A_tilde_vec[m + l + M_max + 1] * Jw[m + m_cut + 1]
         end
         B[li] = acc
