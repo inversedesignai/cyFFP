@@ -10,7 +10,6 @@
       4. Normal incidence (alpha≈0): PSF peaks at ρ=0
       5. Ideal oblique lens: PSF centered at ρ=0 in local frame
       6. cyfft_farfield_modal matches cyfft_farfield
-      7. (renumbered to 8–10)
       8. Airy disk validation: circular symmetry + dark ring location
       9. Analytical Jacobi-Anger decomposition (normal lens + oblique wave)
      10. Convergence with L_max
@@ -53,17 +52,22 @@ println("\n--- Test 2: FFTLog is self-inverse ---")
 Nr_test  = 256
 r_test   = exp.(range(log(1e-2), log(10.0), length=Nr_test))
 dln_test = log(r_test[2] / r_test[1])
+max_rt_err = 0.0
 for nu in [0, 1, 5, 20]
     f_orig = @. exp(-r_test^2 / 2) * r_test^nu
-    f_fwd  = fftlog_hankel(r_test .* f_orig, dln_test, Float64(nu))
-    f_inv  = fftlog_hankel(f_fwd, dln_test, Float64(nu))
-    mid    = Nr_test÷4 : 3*Nr_test÷4
-    scale  = sum(abs.(f_orig[mid]).^2) > 0 ?
-             sum(f_orig[mid] .* f_inv[mid]) / sum(abs.(f_inv[mid]).^2) : 1.0
-    err    = maximum(abs.((f_inv[mid] .* scale) .- f_orig[mid]) ./
-                     (abs.(f_orig[mid]) .+ 1e-12))
+    # Forward: H_ν[r·f](kr),  then inverse: H_ν[kr·result](ρ)
+    g       = r_test .* f_orig
+    g_fwd   = fftlog_hankel(g, dln_test, Float64(nu))
+    kr_test = exp.(log(1.0 / r_test[end]) .+ dln_test .* (0:Nr_test-1))
+    g_inv   = fftlog_hankel(kr_test .* g_fwd, dln_test, Float64(nu))
+    mid     = Nr_test÷4 : 3*Nr_test÷4
+    scale   = real(sum(g[mid] .* conj.(g_inv[mid])) / sum(abs.(g_inv[mid]).^2))
+    err     = maximum(abs.((g_inv[mid] .* scale) .- g[mid]) ./
+                      (abs.(g[mid]) .+ 1e-12))
+    max_rt_err = max(max_rt_err, err)
     println("  nu=$nu: round-trip error = $(round(err, sigdigits=3))")
 end
+@assert max_rt_err < 0.1 "FFTLog round-trip error too large: $max_rt_err"
 println("  PASSED ✓")
 
 # ─── Physical parameters for lens tests ─────────────────────────
@@ -110,8 +114,6 @@ Em_theta_fft = fft(Etheta_s, 2) ./ Ntheta
 
 # Extract positive and negative modes separately for comparison
 dln_s   = log(r[2] / r[1])
-kr_s    = exp.(log(1.0 / r[end]) .+ dln_s .* (0:Nr-1))
-kzok_s  = @. sqrt(max(1.0 - (kr_s / k)^2, 0.0))
 
 sym_err = 0.0
 for m in 1:min(M_max_s, 10)
@@ -183,7 +185,7 @@ Etheta_ob = [-ideal_oblique_lens(rv, th, alpha) * sin(th)
              for rv in r, th in theta]
 
 psf_ob, rho_ob, psi_ob = cyfft_farfield(
-    complex.(Er_ob), complex.(Etheta_ob), collect(r), k, alpha, f;
+    ComplexF64.(Er_ob), ComplexF64.(Etheta_ob), collect(r), k, alpha, f;
     M_buffer=5, L_max=12, Npsi=64)
 
 I_ob    = abs2.(psf_ob)
@@ -203,8 +205,8 @@ println("  PASSED ✓")
 # ─── Test 6: cyfft_farfield_modal matches cyfft_farfield ─────────
 println("\n--- Test 6: Modal entry point matches full-field ---")
 M_max_t = ceil(Int, k * sin(alpha) * R) + 5
-Em_r_full    = fft(complex.(Er_ob), 2) ./ Ntheta
-Em_th_full   = fft(Etheta_ob, 2) ./ Ntheta
+Em_r_full    = fft(ComplexF64.(Er_ob), 2) ./ Ntheta
+Em_th_full   = fft(ComplexF64.(Etheta_ob), 2) ./ Ntheta
 Em_r_pos     = Em_r_full[:, 1:M_max_t+1]
 Em_th_pos    = Em_th_full[:, 1:M_max_t+1]
 
@@ -317,7 +319,7 @@ println("\n--- Test 10: Convergence with L_max ---")
 println("  (Peak intensity vs L_max for ideal oblique lens)")
 for Lm in [2, 5, 10, 15, 20]
     psf_l, _, _ = cyfft_farfield(
-        complex.(Er_ob), complex.(Etheta_ob), collect(r), k, alpha, f;
+        ComplexF64.(Er_ob), ComplexF64.(Etheta_ob), collect(r), k, alpha, f;
         M_buffer=5, L_max=Lm, Npsi=32)
     I_pk = maximum(abs2.(psf_l))
     println("  L_max=$Lm: peak = $(round(I_pk, sigdigits=5))")
