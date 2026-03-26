@@ -166,15 +166,13 @@ end
 println("  R=$(R_7)λ, f=$(round(f_7, digits=1))λ, α=10°, x₀=$(round(x0_7, digits=2))λ")
 println("  M_max=$M_max_7, L_max=$L_max_7")
 
-Er_7  = ComplexF64[u_obl_7(r_7[jr], theta_7[jt])*sin(theta_7[jt])
-                    for jr in 1:Nr_7, jt in 1:Ntheta_7]
-Et_7  = ComplexF64[u_obl_7(r_7[jr], theta_7[jt])*cos(theta_7[jt])
-                    for jr in 1:Nr_7, jt in 1:Ntheta_7]
+u_field_7 = ComplexF64[u_obl_7(r_7[jr], theta_7[jt])
+                       for jr in 1:Nr_7, jt in 1:Ntheta_7]
 
-# Steps 1-3
-Em_r_7, Em_th_7, m_pos_7 = angular_decompose(Er_7, Et_7, M_max_7)
-A_TE_7, A_TM_7, kr_7 = compute_TE_TM_coeffs(Em_r_7, Em_th_7, m_pos_7, collect(r_7), k_7)
-A_tilde_7, m_full_7 = propagate_and_symmetrize(A_TE_7, A_TM_7, m_pos_7, kr_7, k_7, f_7)
+# Steps 1-3 (scalar pipeline)
+u_m_7, _, m_pos_7 = angular_decompose(u_field_7, zeros(ComplexF64, Nr_7, Ntheta_7), M_max_7)
+a_m_7, kr_7 = compute_scalar_coeffs(u_m_7, m_pos_7, collect(r_7))
+A_tilde_7, m_full_7 = propagate_scalar(a_m_7, m_pos_7, kr_7, k_7, f_7)
 
 # Step 4
 println("  Running Graf shift...")

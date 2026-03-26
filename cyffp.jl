@@ -242,8 +242,8 @@ end
 #
 # Symmetry: for a field with u(r,-θ) = u(r,θ) (any linearly
 # polarized illumination of an axisymmetric structure with oblique
-# tilt in the xz-plane), we have u_{-m} = u_m, hence ã_{-m} = ã_m.
-# No sign change, no TE/TM distinction.
+# tilt in the xz-plane), we have u_{-m} = u_m.  Combined with
+# J_{-m}(x) = (-1)^m J_m(x), this gives ã_{-m} = (-1)^m ã_m.
 # ═══════════════════════════════════════════════════════════════
 
 """
@@ -252,7 +252,7 @@ end
 Apply propagation phase and reconstruct negative-m modes via symmetry.
 
 Returns a_tilde[Nkr, 2M_max+1] for m = -M_max:M_max.
-For a symmetric scalar field: ã_{-m} = ã_m (no sign change).
+For a symmetric scalar field: ã_{-m} = (-1)^m ã_m.
 """
 function propagate_scalar(a_m::Matrix{ComplexF64},
                            m_pos::Vector{Int},
@@ -275,10 +275,13 @@ function propagate_scalar(a_m::Matrix{ComplexF64},
         idx_pos = m + M_max + 1
         a_tilde[:, idx_pos] .= propagated
 
-        # Scalar symmetry: ã_{-m} = ã_m
+        # Scalar symmetry: ã_{-m} = (-1)^m ã_m
+        # The (-1)^m comes from J_{-m}(x) = (-1)^m J_m(x) in the
+        # cylindrical harmonic basis, combined with u_{-m} = u_m.
         if m > 0
             idx_neg = -m + M_max + 1
-            a_tilde[:, idx_neg] .= propagated
+            sign = iseven(m) ? 1 : -1
+            a_tilde[:, idx_neg] .= sign .* propagated
         end
     end
 

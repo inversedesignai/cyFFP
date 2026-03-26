@@ -4,23 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CyFFP is a Julia module for **cylindrical near-to-far-field propagation** using Vector Cylindrical Harmonics. It computes the point spread function (PSF) of optical systems at large oblique angles by combining FFTLog Hankel transforms with Graf's addition theorem for a purely modal-space basis shift (no interpolation or Cartesian regridding).
+CyFFP is a Julia module for **cylindrical near-to-far-field propagation** using scalar cylindrical harmonics. It computes the point spread function (PSF) of rotationally symmetric optical systems at large oblique angles by combining FFTLog Hankel transforms with Graf's addition theorem for a purely modal-space basis shift (no interpolation or Cartesian regridding).
 
 **Authors:** Arvin Keshvari (supervised by Dr. Zin Lin)
 
 ## Running Tests
 
 ```bash
-# Unit tests (small arrays, quick)
-julia test_cyfft_graf.jl
+# Step-by-step unit tests
+julia test_step1.jl          # Angular decomposition
+julia test_step2_fftlog.jl   # FFTLog Hankel transform
+julia test_step3.jl          # Scalar propagation + symmetry
+julia test_step4.jl          # Graf shift
 
-# Realistic workload (2mm lens, 500nm, NA=0.25, α=10°)
-julia -t 300 test_real_workload.jl
+# End-to-end validation
+julia test_scalar_airy.jl         # Airy disk with small lens (R=3λ)
+julia test_bruteforce_reference.jl # QuadGK cross-check
+
+# Scaling validation (R=3λ..1000λ, up to 558 modes)
+julia test_scaling.jl
+
+# Production scale (needs ~37 GB for full M_max)
+julia -t auto test_production_aperture.jl
 ```
 
 Start Julia with `-t N` for N threads. The module uses `Threads.@threads` for shared-memory parallelism (no Distributed).
 
-Tests use direct assertions and printed output. Both scripts must end with "All tests passed."
+Tests use direct assertions and printed output.
 
 Optional: `] add Plots` to generate PSF heatmap PNGs.
 
@@ -28,47 +38,46 @@ Optional: `] add Plots` to generate PSF heatmap PNGs.
 
 - **FFTW** - Fast Fourier transforms
 - **SpecialFunctions** - `loggamma` and `besselj`
+- **QuadGK** - Numerical integration (tests only)
 - **Plots** (optional) - PSF heatmap generation
 
-Install via Julia package manager: `] add FFTW SpecialFunctions`
+Install via Julia package manager: `] add FFTW SpecialFunctions QuadGK`
 
-No Project.toml exists; the module is loaded via `include("CyFFP_graf.jl")`.
+No Project.toml exists; the module is loaded via `include("cyffp.jl")`.
 
 ## Architecture
 
-Single-module design in `CyFFP_graf.jl`. Three entry points:
+Single-module design in `cyffp.jl`. The scalar pipeline propagates a single Cartesian component (e.g. E_y) which satisfies the scalar Helmholtz equation exactly.
 
-### Standard path (6-step pipeline)
+### Scalar pipeline (6-step)
 
 1. **Angular decomposition** (`angular_decompose`) — FFT over θ, extract m ≥ 0 only
-2. **Forward Hankel transforms** (`compute_TE_TM_coeffs`) — FFTLog at orders m±1; 4 calls per mode (2 when E_θ=0); threaded over modes
-3. **Propagation + symmetry** (`propagate_and_symmetrize`) — Apply exp(ikz f), reconstruct negative-m via `Ã_{-m} = (-1)^m (A^TM - A^TE) · prop`
-4. **Graf shift** (`graf_shift_all_kr` → `graf_shift_one_kr`) — Mode convolution `B_l = Σ_m Ã_{m+l} J_m(kr x₀)`; Miller backward recurrence for Bessel weights; @simd inner loop; threaded over kr
-5. **Inverse Hankel** (`local_hankel_inverse`) — FFTLog in local basis; only 2L_max+1 calls; threaded
-6. **Angular synthesis** (`synthesize_local_psf`) — IFFT over local modes; threaded over ρ
+2. **Scalar spectral coefficients** (`compute_scalar_coeffs`) — FFTLog at order m; ONE transform per mode: a_m(kr) = H_m[r u_m](kr); threaded over modes
+3. **Propagation + symmetry** (`propagate_scalar`) — Apply exp(ikz f), reconstruct negative-m via scalar symmetry ã_{-m} = (-1)^m ã_m
+4. **Graf shift** (`graf_shift`) — Mode convolution `B_l = Σ_m ã_{m+l} J_m(kr x₀)`; Miller backward recurrence for Bessel weights; @simd inner loop; threaded over kr
+5. **Inverse Hankel** — FFTLog in local basis; only 2L_max+1 calls (not yet implemented)
+6. **Angular synthesis** — IFFT over local modes (not yet implemented)
 
-Drivers:
-- `cyfft_farfield(Er, Etheta, r, k, alpha, f)` — from full 2D field arrays
-- `cyfft_farfield_modal(Em_r_pos, Em_theta_pos, r, k, alpha, f)` — from pre-decomposed m ≥ 0 modes (no negative-m FDTD simulation needed)
+### Neumann shift-theorem fast path (not yet implemented)
 
-### Neumann shift-theorem fast path
-
-- `cyfft_farfield_shift(t_r, r, k, alpha, f)` — for LPA fields of the form t(r)·exp(ikₓ r cosθ)·x̂
-
-Uses the Neumann addition formula `J_m(ar)J_m(br) = (1/2π)∫ J₀(c(φ)r) e^{-imφ} dφ` to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Reduces Step 2 from O(M_max · Nr log Nr) to O(Nr log Nr + Nkr · Nphi log Nphi).
+For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Reduces Step 2 from O(M_max · Nr log Nr) to O(Nr log Nr + Nkr · Nphi log Nphi).
 
 ## Key Design Decisions
 
+- **Scalar formulation**: Each Cartesian component of E satisfies the scalar Helmholtz equation (proven in the tex formulation). This gives ONE Hankel transform per mode at order m, replacing the 4-transform TE/TM approach. The TE/TM combination Ã = A^TE + A^TM was found to be incorrect — it conflates different Bessel structures and produces wrong PSFs.
+- **Scalar symmetry**: For y-polarized illumination with tilt in xz-plane, E_y is even under y→-y, giving u_{-m} = u_m. Combined with J_{-m} = (-1)^m J_m, this gives ã_{-m} = (-1)^m ã_m. This halves the FFTLog calls.
 - **Threading**: `Threads.@threads` for shared-memory parallelism (no serialization overhead). FFTW plan cache is warmed before threaded regions.
-- **Negative-m symmetry**: For φ=0 x-polarized illumination, `E_{-m,r} = E_{m,r}` and `E_{-m,θ} = -E_{m,θ}` (cyFFP0 Eqs. 65-66). This yields `A^TE_{-m} = (-1)^{m+1} A^TE_m` and `A^TM_{-m} = (-1)^m A^TM_m`, halving the FFTLog calls.
-- **FFTLog for Hankel transforms**: Log-space FFT approach, stable for Bessel orders |m| ~ 600+. Filter kernel uses `loggamma` to avoid overflow.
-- **All grids are log-spaced**: `r[j+1]/r[j] = const`. Output ρ-grid is the reciprocal of kr-grid. **Critical**: `r_min` must be ≤ `1/k = λ/(2π)` or propagating modes are lost (the code warns).
-- **E_θ=0 fast path**: When E_θ is identically zero, only 2 FFTLog calls per mode instead of 4.
-- **Graf shift optimizations**: Bessel truncation at `|m| > kr·x₀ + 20`; Miller backward recurrence for J₀..J_{M_max} (~10× faster than independent calls); `@simd` inner loop; `J_{-m} = (-1)^m J_m` halves Bessel evaluations.
+- **FFTLog for Hankel transforms**: Log-space FFT approach, stable for Bessel orders |m| ~ 600+. Filter kernel uses `loggamma` to avoid overflow. Key: |U(q)| = 1 for all q (complex conjugate Gamma pair).
+- **All grids are log-spaced**: `r[j+1]/r[j] = const`. Output ρ-grid is the reciprocal of kr-grid. **Critical**: `r_min` must be ≤ `1/k = λ/(2π)` or propagating modes are lost.
+- **Graf shift optimizations**: Bessel truncation at `|m| > kr·x₀ + 20`; Miller backward recurrence for J₀..J_{M_max} (~10× faster than independent calls); `@simd` inner loop; `J_{-m} = (-1)^m J_m` halves Bessel evaluations; self-normalizing identity `1 = J₀ + 2Σ J_{2k}` with overflow protection.
 - **Normal incidence special case**: When α ≈ 0, x₀ ≈ 0, `J_m(0) = δ_{m,0}`, so the Graf shift becomes the identity.
 
-## Formulation PDFs
+## Formulation
 
-- `cyFFP0.pdf` — Original derivation: vector cylindrical harmonics, TE/TM projections, negative-m symmetry proof
-- `cyFFP1.pdf` — First reformulation: FFTLog + polar-to-Cartesian regridding (superseded by Graf approach)
-- `cyFFP2.pdf` — Current formulation: FFTLog + Graf's addition theorem for spectrally exact local-basis shift
+- `cyFFP_formulation.tex` — Self-contained formulation document: scalar proof, FFTLog, Graf derivation, Neumann shift theorem, cost analysis. TE/TM retained in Appendix A for reference.
+- `cyFFP0.pdf`, `cyFFP1.pdf`, `cyFFP2.pdf` — Historical derivation PDFs (superseded by tex document).
+
+## Deleted Files (for historical reference)
+
+- `dev/` — Old buggy code with wrong FFTLog kernel, wrong TE/TM combination. Deleted.
+- `test_step2_te_tm.jl` — Tested the old compute_TE_TM_coeffs (no longer exists). Deleted.

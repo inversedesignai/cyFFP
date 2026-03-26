@@ -7,7 +7,7 @@
     Tests FFTLog round-trip accuracy vs Tukey taper width on the
     actual production r grid (Nr=2^17=131072).
 
-    Uses the LPA modal workflow: E_m(r) from Jacobi-Anger expansion
+    Uses the LPA modal workflow: u_m(r) from Jacobi-Anger expansion
     (no angular FFT needed, no Nθ-sized arrays).
 
     Run with: julia -t auto test_production_aperture.jl
@@ -36,10 +36,6 @@ println("f = $(round(f_lens, digits=0)) μm,  NA = 0.25,  α = 10°")
 println("kx = $(round(kx, sigdigits=4)) μm⁻¹,  M_max = $M_max")
 
 # ─── Production r grid (padded) ───────────────────────────────
-# Padding: r_max = 100R (2 decades above R) for small-kr boundary
-#          r_min = λ/(20π) (1 decade below 1/k) for large-kr boundary
-# Balance padding vs resolution: Δr(R) = R×dln must be < λ/2.
-# With Nr=2^17, r_max/r_min ratio ≤ exp(Nr × λ/(2R)) = exp(131072×1.25e-4) ≈ exp(16.4) ≈ 1.3e7
 r_min  = lambda / (20π)     # ≈ 0.008 μm (1 decade below 1/k)
 r_max  = 50 * R             # 100,000 μm (1.7 decades above R)
 Nr     = 2^17               # 131072
@@ -55,9 +51,9 @@ println("Δr at R = $(round(R*dln, sigdigits=3)) μm  (λ/2 = $(lambda/2) μm)")
 @assert 1/r_min > k "kr_max must exceed k"
 println("Grid checks passed ✓")
 
-# ─── LPA near-field modes (Jacobi-Anger, y-polarized) ─────────
-# E_{m,r}(r) = t(r) × W(r) × [i^{m-1} J_{m-1}(kx r) - i^{m+1} J_{m+1}(kx r)] / (2i)
-# E_{m,θ}(r) = t(r) × W(r) × [i^{m-1} J_{m-1}(kx r) + i^{m+1} J_{m+1}(kx r)] / 2
+# ─── LPA near-field modes (Jacobi-Anger, scalar) ──────────────
+# For u(r,θ) = t(r) W(r) exp(ikₓ r cosθ), the scalar mode is:
+#   u_m(r) = i^m t(r) W(r) J_m(kₓ r)
 # where t(r) = exp(-ik[√(r²+f²) - f]) and W(r) is the aperture window.
 
 t_lens(rv) = exp(-im * k * (sqrt(rv^2 + f_lens^2) - f_lens))
@@ -73,22 +69,17 @@ function tukey_window(rv, R_ap, alpha_t)
     end
 end
 
-function make_mode(m, r_grid, alpha_taper)
+function make_scalar_mode(m, r_grid, alpha_taper)
     Nr_l = length(r_grid)
-    Em_r  = zeros(ComplexF64, Nr_l)
-    Em_th = zeros(ComplexF64, Nr_l)
+    u_m = zeros(ComplexF64, Nr_l)
+    im_factor = Complex(0.0, 1.0)^m
     for j in 1:Nr_l
         rv = r_grid[j]
         w  = tukey_window(rv, R, alpha_taper)
         t  = t_lens(rv)
-        Jmm1 = besselj(m-1, kx * rv)
-        Jmp1 = besselj(m+1, kx * rv)
-        c1 = Complex(0.0, 1.0)^(m-1)
-        c2 = Complex(0.0, 1.0)^(m+1)
-        Em_r[j]  = t * w * (c1*Jmm1 - c2*Jmp1) / (2im)
-        Em_th[j] = t * w * (c1*Jmm1 + c2*Jmp1) / 2
+        u_m[j] = im_factor * t * w * besselj(m, kx * rv)
     end
-    return Em_r, Em_th
+    return u_m
 end
 
 # ─── Test: Round-trip vs taper width for representative modes ──
@@ -101,16 +92,16 @@ r_vec = collect(r)
 for alpha_t in [0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.10]
     max_err = 0.0
     for m in test_modes
-        Em_r_m, _ = make_mode(m, r_vec, alpha_t)
-        g = r_vec .* Em_r_m   # r-weighted for dr measure
+        u_m_test = make_scalar_mode(m, r_vec, alpha_t)
+        g = r_vec .* u_m_test   # r-weighted for dr measure
 
         # Skip negligible modes
         g_max = maximum(abs.(g))
         if g_max < 1e-20; continue; end
 
-        # Forward + inverse (order m+1)
-        raw  = fftlog_hankel(g, dln, Float64(m + 1))
-        rt   = fftlog_hankel(raw, dln, Float64(m + 1))
+        # Forward + inverse (order m)
+        raw  = fftlog_hankel(g, dln, Float64(m))
+        rt   = fftlog_hankel(raw, dln, Float64(m))
 
         # Compare shapes where signal is significant
         sig = findall(abs.(g) .> 1e-3 * g_max)
@@ -129,16 +120,16 @@ alpha_recommended = 0.005   # 0.5% of R = 10 μm ≈ 20λ
 println("Recommended taper: $(100*alpha_recommended)% of R = $(alpha_recommended*R) μm = $(round(alpha_recommended*R/lambda, digits=0))λ\n")
 
 for m in test_modes
-    Em_r_m, _ = make_mode(m, r_vec, alpha_recommended)
-    g = r_vec .* Em_r_m
+    u_m_test = make_scalar_mode(m, r_vec, alpha_recommended)
+    g = r_vec .* u_m_test
     g_max = maximum(abs.(g))
     if g_max < 1e-20
         println("  m=$m: negligible amplitude, skipped")
         continue
     end
 
-    raw  = fftlog_hankel(g, dln, Float64(m + 1))
-    rt   = fftlog_hankel(raw, dln, Float64(m + 1))
+    raw  = fftlog_hankel(g, dln, Float64(m))
+    rt   = fftlog_hankel(raw, dln, Float64(m))
 
     sig = findall(abs.(g) .> 1e-3 * g_max)
     g_s = g[sig]; rt_s = rt[sig]
@@ -149,75 +140,57 @@ for m in test_modes
     println("  m=$(lpad(m, 4)):  max_err=$(round(err, sigdigits=3)),  median_err=$(round(med_err, sigdigits=3)),  scale=$(round(sc, sigdigits=6)),  |g|_max=$(round(g_max, sigdigits=3))")
 end
 
-# ─── Test: compute_TE_TM_coeffs at production scale ───────────
-println("\n--- compute_TE_TM_coeffs at production scale (one mode at a time) ---")
-# Full M_max=4385 in one shot needs ~37 GB — must process per-mode.
-# This also tests the interface with single-mode [Nr,1] arrays.
+# ─── Test: compute_scalar_coeffs at production scale ──────────
+println("\n--- compute_scalar_coeffs at production scale (one mode at a time) ---")
 
-full_mem_GB = 4 * Nr * (M_max + 1) * 16 / 1e9
+full_mem_GB = Nr * (M_max + 1) * 16 / 1e9
 println("  Full M_max=$M_max would need ≈$(round(full_mem_GB, digits=1)) GB → process per-mode")
 
 for m in [1, 100, 1000, 4000]
-    Em_r_m, Em_th_m = make_mode(m, r_vec, 0.0)
-    Em_r_1  = reshape(Em_r_m, Nr, 1)
-    Em_th_1 = reshape(Em_th_m, Nr, 1)
+    u_m_test = make_scalar_mode(m, r_vec, 0.0)
+    u_m_arr = reshape(u_m_test, Nr, 1)
 
     t_m = @elapsed begin
-        A_TE_1, A_TM_1, kr_prod = compute_TE_TM_coeffs(Em_r_1, Em_th_1, [m], r_vec, k)
+        a_m_1, kr_prod = compute_scalar_coeffs(u_m_arr, [m], r_vec)
     end
 
-    @assert !any(isnan, A_TE_1) "NaN in A^TE for m=$m"
-    @assert !any(isnan, A_TM_1) "NaN in A^TM for m=$m"
+    @assert !any(isnan, a_m_1) "NaN in a_m for m=$m"
+    @assert !any(isinf, a_m_1) "Inf in a_m for m=$m"
 
-    # TM evanescent check
-    evan = findall(kr_prod .> k * 1.1)
-    tm_evan = isempty(evan) ? 0.0 : maximum(abs.(A_TM_1[evan, 1]))
-    @assert tm_evan < 1e-10 "TM not zeroed for m=$m"
-
-    # Propagating-band magnitudes
+    # Propagating-band magnitude
     prop = findall(0.5 .< kr_prod .< k * 0.9)
-    ate_rms = sqrt(sum(abs2.(A_TE_1[prop, 1])) / length(prop))
-    atm_rms = sqrt(sum(abs2.(A_TM_1[prop, 1])) / length(prop))
+    am_rms = sqrt(sum(abs2.(a_m_1[prop, 1])) / length(prop))
 
-    println("  m=$(lpad(m, 4)): $(round(t_m, digits=2))s, |A^TE|=$(round(ate_rms, sigdigits=3)), |A^TM|=$(round(atm_rms, sigdigits=3)), TM_evan=$(round(tm_evan, sigdigits=2))")
+    println("  m=$(lpad(m, 4)): $(round(t_m, digits=2))s, |a_m| rms=$(round(am_rms, sigdigits=3))")
 end
 println("  All per-mode checks passed ✓")
-println("\n  NOTE: On machines with < 40 GB RAM, process modes in batches.")
 println("  PASSED ✓")
 
 
 # ─── Parseval test: energy conservation Step 1 → Step 2 ───────
 println("\n--- Parseval: spatial energy = spectral energy ---")
-# From TE-TE and TM-TM orthogonality:
-#   ∫ |E_m(r)|² r dr = ∫ [|A^TE_m(kr)|² + (kz/k)² |A^TM_m(kr)|²] kr dkr
-#
-# If this holds numerically, the absolute normalization is correct
-# end-to-end through Steps 1–2.  No need to wait for Step 6.
+# Scalar Parseval (from Bessel orthogonality):
+#   ∫ |u_m(r)|² r dr = ∫ |a_m(kr)|² kr dkr
 #
 # Discrete approximation (log-grid Riemann sum):
-#   LHS = Δln × Σ_j (|E_{m,r}|² + |E_{m,θ}|²) × r_j²
-#   RHS = Δln × Σ_k [|A^TE_m|² + (kz/k)² |A^TM_m|²] × kr_k²
-
-kz_over_k = @. sqrt(max(1.0 - (kr / k)^2, 0.0))
+#   LHS = Δln × Σ_j |u_m|² × r_j²
+#   RHS = Δln × Σ_k |a_m|² × kr_k²
 
 println("  Mode   | Spatial energy  | Spectral energy | Ratio")
 println("  -------|-----------------|-----------------|------")
 
 max_parseval_err = 0.0
 for m in [1, 10, 100, 1000, 4000]
-    Em_r_m, Em_th_m = make_mode(m, r_vec, 0.0)  # hard aperture
+    u_m_test = make_scalar_mode(m, r_vec, 0.0)  # hard aperture
 
-    # Spatial energy: ∫ (|E_{m,r}|² + |E_{m,θ}|²) r dr ≈ Δln Σ (...) r²
-    spatial = dln * sum((abs2(Em_r_m[j]) + abs2(Em_th_m[j])) * r_vec[j]^2 for j in 1:Nr)
+    # Spatial energy: ∫ |u_m|² r dr ≈ Δln Σ |u_m|² r²
+    spatial = dln * sum(abs2(u_m_test[j]) * r_vec[j]^2 for j in 1:Nr)
 
-    # TE/TM coefficients
-    A_TE_1, A_TM_1, _ = compute_TE_TM_coeffs(
-        reshape(Em_r_m, Nr, 1), reshape(Em_th_m, Nr, 1), [m], r_vec, k)
+    # Scalar coefficients
+    a_m_1, _ = compute_scalar_coeffs(reshape(u_m_test, Nr, 1), [m], r_vec)
 
-    # Spectral energy: ∫ [|A^TE|² + (kz/k)²|A^TM|²] kr dkr ≈ Δln Σ (...) kr²
-    spectral = dln * sum(
-        (abs2(A_TE_1[j, 1]) + kz_over_k[j]^2 * abs2(A_TM_1[j, 1])) * kr[j]^2
-        for j in 1:Nr)
+    # Spectral energy: ∫ |a_m|² kr dkr ≈ Δln Σ |a_m|² kr²
+    spectral = dln * sum(abs2(a_m_1[j, 1]) * kr[j]^2 for j in 1:Nr)
 
     ratio = real(spectral) / (real(spatial) + 1e-30)
     err = abs(ratio - 1.0)
@@ -227,18 +200,13 @@ for m in [1, 10, 100, 1000, 4000]
 end
 
 println("\n  Max |ratio - 1|: $(round(max_parseval_err, sigdigits=3))")
-# Individual FFTLog preserves energy EXACTLY (Σ|raw|² = Σ|g|² since |U|=1).
-# The discrepancy in the TE/TM Parseval is from combining 4 transforms:
-# cross-term cancellation that holds exactly in the continuous case becomes
-# approximate in the discrete FFTLog.
-# Low modes (m < 100): < 1% — excellent.
-# High modes near cutoff: ~20% — accumulated discretization error.
-# The dominant modes (m ≪ kx R) carry most of the PSF energy and have < 1%.
+# The scalar Parseval uses a SINGLE FFTLog transform (not 4 combined).
+# Individual FFTLog preserves energy well: |U(q)|=1 exactly.
+# Boundary effects (circular convolution wrap-around) are the main error source.
 if max_parseval_err < 0.05
     println("  Parseval PASSED ✓ — absolute normalization verified")
 else
-    println("  Parseval: low-m modes < 1%, high-m modes $(round(100*max_parseval_err, digits=0))%")
-    println("  (discretization error in 4-transform combination, not a normalization bug)")
+    println("  Parseval: low-m modes should be < 5%, high-m modes may have boundary effects")
 end
 @assert max_parseval_err < 0.25 "Parseval violation exceeds expected FFTLog accuracy"
 
@@ -250,10 +218,8 @@ L_max_prod = 20
 println("  x₀ = $(round(x0_prod, digits=1)) μm, L_max = $L_max_prod")
 println("  kr×x₀ range: $(round(kr[1]*x0_prod, sigdigits=3)) to $(round(kr[end]*x0_prod, sigdigits=3))")
 
-# Build a representative A_tilde: just a few modes nonzero
-# (can't allocate full [131072 × 8771] = 18 GB here — test per-mode batching)
-# Instead, use a small M_max and verify the Graf shift mechanics.
-M_test = 50  # small M_max for memory
+# Build a representative a_tilde: small M_max for memory
+M_test = 50
 m_full_test = collect(-M_test:M_test)
 A_tilde_test = zeros(ComplexF64, Nr, 2M_test + 1)
 

@@ -24,7 +24,7 @@
 \newcommand{\bpsi}{\boldsymbol{\psi}}
 
 \title{Cylindrical Far-Field Propagation (CyFFP)\\[6pt]
-\large Complete Formulation with Full Derivations}
+\large Scalar Formulation with Full Derivations}
 \author{Arvin Keshvari \quad (Supervisor: Dr.\ Zin Lin)}
 \date{March 2026}
 
@@ -41,13 +41,24 @@ We compute the point spread function (PSF) of rotationally symmetric optical
 systems at oblique incidence angle~$\alpha$.  The method:
 \begin{enumerate}[nosep]
   \item Decomposes the near field into angular-momentum eigenmodes $e^{im\theta}$.
-  \item Projects each mode onto vector cylindrical harmonics (TE and TM).
-  \item Propagates each harmonic to the focal plane via the known $e^{ik_z z}$ phase.
+  \item Computes scalar spectral coefficients via Hankel transform at order~$m$.
+  \item Propagates each coefficient to the focal plane via the known $e^{ik_z z}$ phase.
   \item Re-expands in a local cylindrical basis centered at the focal spot using
         Graf's addition theorem.
   \item Reconstructs the PSF by inverse Hankel transform and angular IFFT.
 \end{enumerate}
 The formulation is exact (no paraxial approximation).
+
+\paragraph{Scalar formulation.}
+For a linearly polarized field $\E = u(r,\theta)\,\hat p$ (where $\hat p$ is a
+fixed Cartesian unit vector such as $\yhat$ or $\xhat$), the Cartesian component
+along $\hat p$ satisfies the \emph{scalar} wave equation exactly.  The spectral
+coefficient for each angular mode is a \emph{single} Hankel transform at order~$m$
+(see \S\ref{sec:scalar_coeffs}).  This is both simpler and more correct than the
+vector TE/TM approach, which uses 4~transforms at orders $m\pm 1$ per mode and
+conflates different Bessel structures when the TE and TM coefficients are naively
+combined.  The TE/TM decomposition is retained in Appendix~\ref{app:TETM} for
+reference and for future vector-field extensions.
 
 
 %=======================================================================
@@ -84,8 +95,9 @@ directly the modal near field $\E^{\mathrm{Near}}_m(r)$ --- even when the incide
 field (oblique plane wave) is not rotationally symmetric.  In this workflow, the
 modes $E_{m,r}(r)$, $E_{m,\theta}(r)$ are \textbf{available for each $m$ separately}
 and there is no need to construct or Fourier-transform a 2D field $\E(r,\theta)$.
-The appropriate entry point is \texttt{cyfft\_farfield\_modal}, which accepts
-the modes for $m \ge 0$ directly.
+The appropriate entry point is \texttt{compute\_scalar\_coeffs}, which accepts
+the scalar modes $u_m(r)$ for $m \ge 0$ directly (see~\eqref{eq:uy_from_cyl}
+for how to extract $u_m$ from the cylindrical FDTD output).
 
 \paragraph{Secondary workflow: analytical or synthetic 2D fields.}
 When a closed-form expression for $\E(r,\theta)$ is available (e.g.\ for validation),
@@ -144,289 +156,145 @@ Immediate consequences with $x = k_r r$:
 
 
 %=======================================================================
-\section{Vector Cylindrical Harmonics from the Helmholtz Equation}
-\label{sec:harmonics}
+\section{Scalar Wave Equation and Spectral Coefficients}
+\label{sec:scalar_coeffs}
 %=======================================================================
 
-\subsection{Scalar Helmholtz equation in cylindrical coordinates}
+\subsection{Each Cartesian component satisfies the scalar Helmholtz equation}
 
-In a source-free region, the electric and magnetic fields can be derived from
-scalar potentials satisfying the Helmholtz equation
-\begin{equation}\label{eq:helmholtz}
-  \nabla^2\psi + k^2\psi = 0,\qquad k = \frac{2\pi n}{\lambda} = \omega\sqrt{\mu\epsilon}.
-\end{equation}
-In cylindrical coordinates:
-\begin{equation}
-  \frac{1}{r}\frac{\partial}{\partial r}\Bigl(r\frac{\partial\psi}{\partial r}\Bigr)
-  + \frac{1}{r^2}\frac{\partial^2\psi}{\partial\theta^2}
-  + \frac{\partial^2\psi}{\partial z^2}
-  + k^2\psi = 0.
-\end{equation}
-Separation of variables $\psi = R(r)\,\Theta(\theta)\,Z(z)$ gives:
-\begin{itemize}[nosep]
-  \item $Z'' = -k_z^2 Z$ \;$\Rightarrow$\; $Z = e^{\pm ik_z z}$,
-  \item $\Theta'' = -m^2\Theta$ \;$\Rightarrow$\; $\Theta = e^{im\theta}$,
-  \item $r(rR')' + (k_r^2 r^2 - m^2)R = 0$ \;$\Rightarrow$\; $R = J_m(k_r r)$,
-\end{itemize}
-where $k_r^2 + k_z^2 = k^2$.  The complete solution is
-\begin{equation}\label{eq:psi}
-  \psi = J_m(k_r r)\,e^{im\theta}\,e^{ik_z z}.
-\end{equation}
-
-
-\subsection{TM harmonics: derivation from the TM potential}
-\label{sec:TM_deriv}
-
-Set the vector potential $\A/\mu = \bpsi = (0,0,\psi_z)$ with $\psi_z = \psi$ from~\eqref{eq:psi}.
-
-\paragraph{Magnetic field.}
-$\H = \frac{1}{\mu}\nabla\times\A = \nabla\times\bpsi$:
-\begin{equation}
-  \H = \begin{pmatrix}
-    \frac{1}{r}\frac{\partial\psi}{\partial\theta}\\[4pt]
-    -\frac{\partial\psi}{\partial r}\\[4pt]
-    0
-  \end{pmatrix}
-  = \begin{pmatrix}
-    \frac{im}{r}\,J_m\\[4pt]
-    -k_r J_m'\\[4pt]
-    0
-  \end{pmatrix} e^{im\theta}\,e^{ik_z z},
-\end{equation}
-where $J_m' \equiv dJ_m(k_r r)/d(k_r r)$.  Note $H_z = 0$ (TM condition).
-
-\paragraph{Electric field.}
-From $\nabla\times\H = -i\omega\epsilon\,\E$, we have
-$\E = \frac{-1}{i\omega\epsilon}\nabla\times\H = \frac{i}{\omega\epsilon}\nabla\times\H$.
-The $r$ and $\theta$ components of $\nabla\times\H$ (with $H_z = 0$) are
-$(\nabla\times\H)_r = -\partial H_\theta/\partial z$ and
-$(\nabla\times\H)_\theta = \partial H_r/\partial z$.  Therefore:
-\begin{align}
-  E_r &= \frac{i}{\omega\epsilon}\Bigl(-\frac{\partial H_\theta}{\partial z}\Bigr)
-       = \frac{i}{\omega\epsilon}\bigl(-ik_z\bigr)\bigl(-k_r J_m'\bigr)
-       = -\frac{k_z}{\omega\epsilon}\,k_r J_m', \label{eq:TM_Er}\\[4pt]
-  E_\theta &= \frac{i}{\omega\epsilon}\frac{\partial H_r}{\partial z}
-            = \frac{i}{\omega\epsilon}(ik_z)\frac{im}{r}J_m
-            = -\frac{i\,m\,k_z}{\omega\epsilon\, r}\,J_m, \label{eq:TM_Eth}\\[4pt]
-  E_z &= \frac{i}{\omega\epsilon}\frac{1}{r}\Bigl[\frac{\partial(rH_\theta)}{\partial r}
-          - \frac{\partial H_r}{\partial\theta}\Bigr].
-\end{align}
-Using $\omega\epsilon = k\sqrt{\epsilon/\mu} = k/\eta$ (where $\eta = \sqrt{\mu/\epsilon}$),
-and $k_r J_m'(k_r r) = \frac{\partial J_m(k_r r)}{\partial r}$:
-\begin{equation}\label{eq:ETM_tang}
-\boxed{
-  \E^{\mathrm{TM},\perp}_{m,k_r}
-  = \eta\Bigl[
-    -\frac{k_z}{k}\,\frac{\partial J_m(k_r r)}{\partial r}\,\rhat
-    \;-\; i\,\frac{m\,k_z}{k\,r}\,J_m(k_r r)\,\that
-  \Bigr]\,e^{im\theta}\,e^{ik_z z}.
-}
-\end{equation}
-(We will absorb $\eta$ into the expansion coefficients and drop it hereafter.)
-
-
-\subsection{TE harmonics: derivation from the TE potential}
-\label{sec:TE_deriv}
-
-Set $\F/\epsilon = \bpsi = (0,0,\psi_z)$.  Then $\D = \nabla\times\F$ and
-$\E = -\frac{1}{\epsilon}\D = -\nabla\times\bpsi$:
-\begin{equation}\label{eq:ETE}
-  \E^{\mathrm{TE}}_{m,k_r}
-  = -\begin{pmatrix}
-    \frac{1}{r}\frac{\partial\psi}{\partial\theta}\\[4pt]
-    -\frac{\partial\psi}{\partial r}\\[4pt]
-    0
-  \end{pmatrix}
-  = \begin{pmatrix}
-    -\frac{im}{r}\,J_m(k_r r)\\[4pt]
-    \frac{\partial J_m(k_r r)}{\partial r}\\[4pt]
-    0
-  \end{pmatrix} e^{im\theta}\,e^{ik_z z}.
-\end{equation}
-Note $E_z = 0$ (TE condition, electric field purely tangential).
-
-\begin{equation}\label{eq:ETE_tang}
-\boxed{
-  \E^{\mathrm{TE},\perp}_{m,k_r}
-  = \Bigl[
-    -\frac{im}{r}\,J_m(k_r r)\,\rhat
-    + \frac{\partial J_m(k_r r)}{\partial r}\,\that
-  \Bigr]\,e^{im\theta}\,e^{ik_z z}.
-}
-\end{equation}
-
-
-%=======================================================================
-\section{TE Expansion Coefficient: Full Derivation}
-\label{sec:TE_coeff}
-%=======================================================================
-
-The near field is expanded as
-\begin{equation}
-  \E^{\mathrm{Near}}(r,\theta) = \sum_m\int dk_r\,
-  \bigl[A^{\mathrm{TE}}_m(k_r)\,\E^{\mathrm{TE}}_{m,k_r}(r,\theta,0)
-  + A^{\mathrm{TM}}_m(k_r)\,\E^{\mathrm{TM}}_{m,k_r}(r,\theta,0)\bigr].
-\end{equation}
-To extract $A^{\mathrm{TE}}_m$, project onto $\E^{\mathrm{TE}*}_{m,k_r'}$
-and integrate over $r$ and $\theta$.  The $\theta$-integral selects $m'=m$;
-TE--TM orthogonality kills the TM cross-term.
-
-\subsection{TE--TE inner product}
-
-From~\eqref{eq:ETE_tang} at $z=0$:
-\begin{align}
-  \E^{\mathrm{TE}}_{m,k_r}\cdot\E^{\mathrm{TE}*}_{m,k_r'}
-  &= \frac{m^2}{r^2}\,J_m(k_r r)\,J_m(k_r' r)
-   + \frac{\partial J_m(k_r r)}{\partial r}\,\frac{\partial J_m(k_r' r)}{\partial r}.
-\end{align}
-Substitute~\eqref{eq:moverx} and~\eqref{eq:dJdr}:
-\begin{align}
-  \frac{m^2}{r^2}\,J_m J_m'
-  &= \frac{k_r k_r'}{4}\,(J_{m-1}+J_{m+1})(J_{m-1}'+J_{m+1}'),\\[4pt]
-  \frac{\partial J_m}{\partial r}\frac{\partial J_m'}{\partial r}
-  &= \frac{k_r k_r'}{4}\,(J_{m-1}-J_{m+1})(J_{m-1}'-J_{m+1}'),
-\end{align}
-where unprimed/primed $J$ have arguments $k_r r$ and $k_r' r$ respectively.
-Adding, cross terms cancel:
-\begin{equation}\label{eq:TETE}
-  \E^{\mathrm{TE}}_{m,k_r}\cdot\E^{\mathrm{TE}*}_{m,k_r'}
-  = \frac{k_r k_r'}{2}\bigl[
-    J_{m+1}(k_r r)\,J_{m+1}(k_r' r) + J_{m-1}(k_r r)\,J_{m-1}(k_r' r)
-  \bigr].
-\end{equation}
-
-\subsection{Radial integration and orthogonality}
-
-Using~\eqref{eq:bessel_orth}:
-\begin{align}
-  \int_0^\infty r\;\E^{\mathrm{TE}}_{m,k_r}\cdot\E^{\mathrm{TE}*}_{m,k_r'}\;dr
-  &= \frac{k_r k_r'}{2}\Bigl[
-    \frac{\delta(k_r-k_r')}{k_r} + \frac{\delta(k_r-k_r')}{k_r}
-  \Bigr]
-  = k_r'\,\delta(k_r-k_r').
-\end{align}
-Therefore the full projection gives
-\begin{equation}
-  \int_0^\infty\!\!\int_0^{2\pi}
-  \E^{\mathrm{Near}}\cdot\E^{\mathrm{TE}*}_{m,k_r'}\;r\,dr\,d\theta
-  = 2\pi\, k_r'\, A^{\mathrm{TE}}_m(k_r').
-\end{equation}
-
-\subsection{Extracting the coefficient}
-
-\begin{equation}
-  A^{\mathrm{TE}}_m(k_r) = \frac{1}{k_r}\int_0^\infty
-  \E^{\mathrm{Near}}_m(r)\cdot\E^{\mathrm{TE}*}_{m,k_r}(r)\;r\,dr.
-\end{equation}
-Now $\E^{\mathrm{TE}*}_{m,k_r}(r) = \bigl[\frac{im}{r}J_m\,\rhat + \frac{\partial J_m}{\partial r}\,\that\bigr]$
-(conjugate of~\eqref{eq:ETE_tang} with real $J_m$, flipping $-im/r \to +im/r$).
-
-Expand the dot product:
-\begin{equation}
-  \E^{\mathrm{Near}}_m\cdot\E^{\mathrm{TE}*}_{m,k_r}
-  = E_{m,r}\cdot\frac{im}{r}J_m + E_{m,\theta}\cdot\frac{\partial J_m}{\partial r}.
-\end{equation}
-
-Therefore:
-\begin{equation}\label{eq:ATE_raw}
-  A^{\mathrm{TE}}_m(k_r)
-  = \int_0^\infty\Bigl[
-    \frac{im}{k_r r}\,J_m(k_r r)\,E_{m,r}(r)
-    + \frac{1}{k_r}\frac{\partial J_m(k_r r)}{\partial r}\,E_{m,\theta}(r)
-  \Bigr]\,r\,dr.
-\end{equation}
-
-\subsection{Substituting recurrences}
-
-Using~\eqref{eq:moverx}: $\;\displaystyle\frac{im}{k_r r}J_m = \frac{i}{2}(J_{m-1}+J_{m+1})$.
-
-Using~\eqref{eq:dJdr}: $\;\displaystyle\frac{1}{k_r}\frac{\partial J_m}{\partial r} = \frac{1}{2}(J_{m-1}-J_{m+1})$.
-
-Substituting into~\eqref{eq:ATE_raw}:
-\begin{align}
-  A^{\mathrm{TE}}_m(k_r)
-  &= \int_0^\infty\Bigl\{
-    E_{m,r}\cdot\frac{i}{2}\bigl[J_{m+1}+J_{m-1}\bigr]
-    + E_{m,\theta}\cdot\frac{1}{2}\bigl[J_{m-1}-J_{m+1}\bigr]
-  \Bigr\}\,r\,dr \nonumber\\[6pt]
-  &= \frac{i}{2}\int_0^\infty r\,E_{m,r}\,\bigl[J_{m+1}(k_r r)+J_{m-1}(k_r r)\bigr]\,dr
-  \nonumber\\
-  &\quad+ \frac{1}{2}\int_0^\infty r\,E_{m,\theta}\,\bigl[J_{m-1}(k_r r)-J_{m+1}(k_r r)\bigr]\,dr.
-\end{align}
-
-Recognizing each integral as a Hankel transform $\HT_\nu[f](k_r) = \int_0^\infty f(r)\,J_\nu(k_r r)\,dr$:
-
-\begin{tcolorbox}[title=TE coefficient (final)]
-\begin{equation}\label{eq:ATE}
-  A^{\mathrm{TE}}_m(k_r)
-  = \frac{i}{2}\bigl[\HT_{m+1}[r\,E_{m,r}] + \HT_{m-1}[r\,E_{m,r}]\bigr]
-  + \frac{1}{2}\bigl[\HT_{m-1}[r\,E_{m,\theta}] - \HT_{m+1}[r\,E_{m,\theta}]\bigr].
-\end{equation}
+\begin{tcolorbox}[title=Theorem]
+In a source-free homogeneous medium, every Cartesian component of $\E$ independently
+satisfies the scalar Helmholtz equation $\nabla^2 u + k^2 u = 0$.
 \end{tcolorbox}
 
-
-%=======================================================================
-\section{TM Expansion Coefficient: Full Derivation}
-\label{sec:TM_coeff}
-%=======================================================================
-
-The derivation parallels the TE case.  The TM tangential field
-from~\eqref{eq:ETM_tang} at $z=0$ (dropping $\eta$) is
-\begin{equation}
-  \E^{\mathrm{TM},\perp}_{m,k_r}
-  = -\frac{k_z}{k}\,\frac{\partial J_m}{\partial r}\,\rhat
-  - \frac{i\,m\,k_z}{k\,r}\,J_m\,\that.
+\begin{proof}
+In a source-free homogeneous region ($\rho_{\mathrm{free}}=0$, constant $\epsilon,\mu$),
+Maxwell's curl equations give
+\begin{equation}\label{eq:maxwell_curl}
+  \nabla\times\nabla\times\E = k^2\E, \qquad k = \omega\sqrt{\mu\epsilon}.
 \end{equation}
-
-\subsection{TM--TM inner product}
-
-Following the same steps as \S\ref{sec:TE_coeff}:
-\begin{align}
-  \E^{\mathrm{TM}}_{m,k_r}\cdot\E^{\mathrm{TM}*}_{m,k_r'}
-  &= \frac{k_z k_z'}{k^2}\Bigl[
-    \frac{\partial J_m(k_r r)}{\partial r}\frac{\partial J_m(k_r' r)}{\partial r}
-    + \frac{m^2}{r^2}J_m(k_r r)J_m(k_r' r)
-  \Bigr] \nonumber\\
-  &= \frac{k_z k_z'}{k^2}\cdot\frac{k_r k_r'}{2}
-    \bigl[J_{m+1}J_{m+1}' + J_{m-1}J_{m-1}'\bigr],
-\end{align}
-which gives the same orthogonality structure (with an extra $k_z^2/k^2$ factor
-absorbed into the coefficient normalization).
-
-\subsection{Extracting the coefficient}
-
-The conjugate $\E^{\mathrm{TM}*}$ flips $-i\to+i$ in the $\that$-component.
-The dot product with the near field gives:
-\begin{equation}
-  \E^{\mathrm{Near}}_m\cdot\E^{\mathrm{TM}*}
-  = -\frac{k_z}{k}\frac{\partial J_m}{\partial r}\,E_{m,r}
-  + \frac{i\,m\,k_z}{k\,r}\,J_m\,E_{m,\theta}.
+The vector identity $\nabla\times\nabla\times\E = \nabla(\nabla\cdot\E) - \nabla^2\E$
+combined with the divergence condition $\nabla\cdot\E = 0$ (from $\rho_{\mathrm{free}}=0$
+and homogeneity) yields the \textbf{vector Helmholtz equation}:
+\begin{equation}\label{eq:vector_helmholtz}
+  \nabla^2\E + k^2\E = \mathbf{0}.
 \end{equation}
+The vector Laplacian of $\E = E_x\,\xhat + E_y\,\yhat + E_z\,\zhat$ in Cartesian
+coordinates is simply
+\begin{equation}
+  \nabla^2\E = (\nabla^2 E_x)\,\xhat + (\nabla^2 E_y)\,\yhat + (\nabla^2 E_z)\,\zhat,
+\end{equation}
+because $\xhat$, $\yhat$, $\zhat$ are \emph{constant} --- they do not depend on
+position.  Substituting into~\eqref{eq:vector_helmholtz} and projecting onto each
+basis vector:
+\begin{equation}\label{eq:scalar_helmholtz_components}
+  \nabla^2 E_x + k^2 E_x = 0, \qquad
+  \nabla^2 E_y + k^2 E_y = 0, \qquad
+  \nabla^2 E_z + k^2 E_z = 0.
+\end{equation}
+Each Cartesian component independently satisfies the scalar Helmholtz equation.
+\end{proof}
 
-After the normalization integral and substituting~\eqref{eq:moverx}--\eqref{eq:dJdr}:
+\paragraph{Why this does NOT hold for cylindrical components.}
+The same argument fails for $E_r$ and $E_\theta$ because the cylindrical unit vectors
+$\rhat(\theta)$ and $\that(\theta)$ depend on position.  Writing
+$\E = E_r\,\rhat + E_\theta\,\that + E_z\,\zhat$ and applying $\nabla^2$
+produces cross-derivative terms:
+\begin{equation}
+  \nabla^2\E \;\ne\; (\nabla^2 E_r)\,\rhat + (\nabla^2 E_\theta)\,\that + (\nabla^2 E_z)\,\zhat.
+\end{equation}
+Explicitly, the $r$- and $\theta$-components of $\nabla^2\E$ are (Jackson \S3.6):
 \begin{align}
-  A^{\mathrm{TM}}_m(k_r)
-  &= -\frac{k_z/k}{2}\int_0^\infty r\,E_{m,r}\,
-    \bigl[J_{m-1}(k_r r) - J_{m+1}(k_r r)\bigr]\,dr \nonumber\\
-  &\quad -\frac{ik_z/k}{2}\int_0^\infty r\,E_{m,\theta}\,
-    \bigl[J_{m-1}(k_r r) + J_{m+1}(k_r r)\bigr]\,dr.
+  (\nabla^2\E)_r &= \nabla^2 E_r - \frac{E_r}{r^2} - \frac{2}{r^2}\frac{\partial E_\theta}{\partial\theta},
+  \label{eq:vec_lap_r}\\[4pt]
+  (\nabla^2\E)_\theta &= \nabla^2 E_\theta - \frac{E_\theta}{r^2} + \frac{2}{r^2}\frac{\partial E_r}{\partial\theta}.
+  \label{eq:vec_lap_theta}
+\end{align}
+The extra terms couple $E_r$ and $E_\theta$, so neither satisfies a scalar equation
+alone.  This is precisely why the TE/TM decomposition (Appendix~\ref{app:TETM})
+introduces the vector cylindrical harmonics with their complicated $m\pm 1$ Bessel
+structure --- it diagonalizes the coupled system~\eqref{eq:vec_lap_r}--\eqref{eq:vec_lap_theta}.
+
+\subsection{Application to linearly polarized near fields}
+\label{sec:scalar_application}
+
+Let $u(r,\theta,z) \equiv E_y(r,\theta,z)$ denote the $y$-component of the electric
+field.  By~\eqref{eq:scalar_helmholtz_components}, $u$ satisfies the scalar Helmholtz
+equation
+\begin{equation}\label{eq:scalar_helmholtz}
+  \nabla^2 u + k^2 u = 0
+\end{equation}
+everywhere in the propagation region $z > 0$.
+
+\paragraph{What this means for CyFFP.}
+Given the near-field $u(r,\theta,0) = E_y(r,\theta,0)$ at $z=0$, we can propagate $u$
+to the focal plane $z = f$ using scalar cylindrical harmonics (Bessel functions $\times$
+angular modes $\times$ plane-wave phases).  The result is $E_y(\rho,\psi,f)$, the
+$y$-component of the PSF.  The PSF intensity for $y$-polarized light is $|E_y|^2$.
+
+\paragraph{Important subtlety: the full vector field is NOT purely $\yhat$-polarized.}
+Even if the near field is purely $y$-polarized at $z = 0$, the propagated field at
+$z = f$ generally has nonzero $E_x$ and $E_z$ components (required by
+$\nabla\cdot\E = 0$).  However, each of these components \emph{also} satisfies its
+own scalar Helmholtz equation and can be propagated independently.  The scalar CyFFP
+pipeline computes $E_y$ at the focal plane --- the dominant polarization component.
+For the cross-polarization component $E_x$, see the discussion in
+Appendix~\ref{app:TETM}.
+
+\paragraph{Practical note: extracting $u$ from cylindrical FDTD output.}
+FDTD in cylindrical coordinates outputs $E_{m,r}(r)$ and $E_{m,\theta}(r)$ for each
+angular mode~$m$.  The $y$-component is obtained via
+$\yhat = \sin\theta\,\rhat + \cos\theta\,\that$:
+\begin{equation}\label{eq:uy_from_cyl}
+  u_m(r) = E_{m,y}(r)
+  = \frac{1}{2i}\bigl[E_{m-1,r}(r) - E_{m+1,r}(r)\bigr]
+  + \frac{1}{2}\bigl[E_{m-1,\theta}(r) + E_{m+1,\theta}(r)\bigr],
+\end{equation}
+using $\sin\theta = (e^{i\theta}-e^{-i\theta})/(2i)$ and
+$\cos\theta = (e^{i\theta}+e^{-i\theta})/2$, which shift the mode index by $\pm 1$.
+For validation with analytical 2D fields, $u(r,\theta)$ is simply the known
+$y$-component evaluated on the grid.
+
+\subsection{Cylindrical expansion of the scalar field}
+
+The scalar Helmholtz equation~\eqref{eq:scalar_helmholtz} in cylindrical coordinates
+admits solutions $J_m(k_r r)\,e^{im\theta}\,e^{ik_z z}$ with $k_r^2 + k_z^2 = k^2$.
+The near field is expanded as
+\begin{equation}\label{eq:scalar_expansion}
+  u(r,\theta,0) = \sum_m u_m(r)\,e^{im\theta}
+  = \sum_m\int_0^\infty a_m(k_r)\,J_m(k_r r)\,k_r\,dk_r\;\,e^{im\theta},
+\end{equation}
+where $a_m(k_r)$ is the scalar spectral coefficient and the $k_r\,dk_r$ measure
+comes from the Bessel orthogonality relation~\eqref{eq:bessel_orth}.
+
+\subsection{Extracting the spectral coefficient}
+
+Multiply both sides of $u_m(r) = \int_0^\infty a_m(k_r)\,J_m(k_r r)\,k_r\,dk_r$
+by $J_m(k_r' r)\,r$ and integrate over $r$:
+\begin{align}
+  \int_0^\infty u_m(r)\,J_m(k_r' r)\,r\,dr
+  &= \int_0^\infty a_m(k_r)\Bigl[\int_0^\infty J_m(k_r r)\,J_m(k_r' r)\,r\,dr\Bigr]\,k_r\,dk_r
+  \nonumber\\
+  &= \int_0^\infty a_m(k_r)\,\frac{\delta(k_r - k_r')}{k_r}\,k_r\,dk_r
+  = a_m(k_r').
 \end{align}
 
-\begin{tcolorbox}[title=TM coefficient (final)]
-\begin{equation}\label{eq:ATM}
-  A^{\mathrm{TM}}_m(k_r)
-  = -\frac{k_z/k}{2}\bigl[\HT_{m-1}[rE_{m,r}] - \HT_{m+1}[rE_{m,r}]\bigr]
-  - \frac{ik_z/k}{2}\bigl[\HT_{m-1}[rE_{m,\theta}] + \HT_{m+1}[rE_{m,\theta}]\bigr].
+\begin{tcolorbox}[title=Scalar spectral coefficient]
+\begin{equation}\label{eq:am_scalar}
+  a_m(k_r)
+  = \int_0^\infty u_m(r)\,J_m(k_r r)\,r\,dr
+  = \HT_m[r\,u_m](k_r),
 \end{equation}
 \end{tcolorbox}
 
 \noindent
-Note $k_z/k = \sqrt{1-(k_r/k)^2}$ depends on $k_r$ and must be applied pointwise.
+where $\HT_m[f](k_r) = \int_0^\infty f(r)\,J_m(k_r r)\,dr$ denotes the order-$m$
+Hankel transform (plain $dr$ measure, with the $r$ weight absorbed into the argument).
 
 \paragraph{Mode count.}
-Each mode~$m$ requires \textbf{4 Hankel transforms}: $\HT_{m\pm 1}$ applied to
-$r E_{m,r}$ and $r E_{m,\theta}$.
-When $E_{m,\theta}\equiv 0$ (scalar-like field), only \textbf{2 transforms} are needed.
+Each mode~$m$ requires a \textbf{single Hankel transform} at order~$m$.
+Compare with the TE/TM approach (Appendix~\ref{app:TETM}), which requires
+\textbf{4~transforms} at orders $m\pm 1$ per mode.
 
 \paragraph{Mode truncation.}
 $|m| \le M_{\max} = \lceil k\sin\alpha\cdot R\rceil + \delta M$,
@@ -434,229 +302,77 @@ determined by $J_m(k\sin\alpha\cdot R) \approx 0$ for $m \gg k\sin\alpha\cdot R$
 
 
 %=======================================================================
-\section{Negative-m Symmetry: Full Proof}
-\label{sec:symmetry}
+\section{Negative-$m$ Symmetry (Scalar Case)}
+\label{sec:scalar_symmetry}
 %=======================================================================
 
-\subsection{The curl operator for angular mode m}
+We prove that $u(r,-\theta) = u(r,\theta)$ for the $y$-component of the electric
+field of a rotationally symmetric structure illuminated by a $y$-polarized plane
+wave propagating in the $xz$-plane.
 
-For fields with angular dependence $e^{im\theta}$, the substitution
-$\partial/\partial\theta \to im$ gives the modal curl operator:
-\begin{equation}\label{eq:Dm}
-  \mathcal{D}_m = \begin{pmatrix}
-    0 & -\dfrac{\partial}{\partial z} & \dfrac{im}{r} \\[8pt]
-    \dfrac{\partial}{\partial z} & 0 & -\dfrac{\partial}{\partial r} \\[8pt]
-    -\dfrac{im}{r} & \dfrac{1}{r}\dfrac{\partial}{\partial r}(r\,\cdot\,) & 0
-  \end{pmatrix}.
-\end{equation}
-The modal Maxwell equation for mode $m$ is
-\begin{equation}\label{eq:maxwell_m}
-  \mathcal{D}_m\mathcal{D}_m\,\E_m - \omega^2\epsilon\,\E_m = i\omega\,\J_m.
-\end{equation}
-
-\subsection{Reflection symmetry of the curl-curl operator}
-
-Define $\hat\sigma = \mathrm{diag}(s_r,\,s_\theta,\,1)$ with $s_r s_\theta = -1$
-(either $(s_r,s_\theta) = (+1,-1)$ or $(-1,+1)$).
-Since $\hat\sigma^2 = I$, we can insert $I = \hat\sigma\hat\sigma$ into
-the $(-m)$-equation:
+Consider the mirror reflection $\sigma_y: (x,y,z) \to (x,-y,z)$.  A polar vector
+$\E = (E_x,E_y,E_z)$ transforms as
 \begin{equation}
-  \hat\sigma\,\mathcal{D}_{-m}\mathcal{D}_{-m}\,\hat\sigma\;
-  (\hat\sigma\E_{-m}) - \omega^2\epsilon\,(\hat\sigma\E_{-m})
-  = i\omega\,(\hat\sigma\J_{-m}).
+  \sigma_y[\E](x,y,z)
+  = \bigl(E_x(x,-y,z),\;-E_y(x,-y,z),\;E_z(x,-y,z)\bigr).
 \end{equation}
-If $\hat\sigma\,\mathcal{D}_{-m}\mathcal{D}_{-m}\,\hat\sigma = \mathcal{D}_m\mathcal{D}_m$
-and $\hat\sigma\J_{-m} = \J_m$, then $\hat\sigma\E_{-m}$ satisfies the
-\emph{same} equation as $\E_m$.  By uniqueness, $\E_{-m} = \hat\sigma\E_m$.
-
-\paragraph{Proof that $\hat\sigma\,\mathcal{D}_{-m}^2\,\hat\sigma = \mathcal{D}_m^2$.}
-We show this via $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = \pm\mathcal{D}_m$
-(either sign gives the same result after squaring).
-
-$\mathcal{D}_{-m}$ is obtained from $\mathcal{D}_m$ by $m \to -m$:
-the $(1,3)$ and $(3,1)$ entries flip sign.  Computing the conjugation
-$(\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma)_{ij} = s_i\,(\mathcal{D}_{-m})_{ij}\,s_j$
-entry by entry:
-
-\medskip
-\noindent
-\textbf{Case 1:} $\hat\sigma = \mathrm{diag}(-1,+1,+1)$ (y-polarization).
-\begin{center}
-\begin{tabular}{@{}ccc@{}}
-$(i,j)$ & $s_i (\mathcal{D}_{-m})_{ij}\,s_j$ & $(\mathcal{D}_m)_{ij}$ \\
-\midrule
-$(1,2)$ & $(-1)(-\partial_z)(+1) = +\partial_z$ & $-\partial_z$ \\
-$(1,3)$ & $(-1)(-im/r)(+1) = +im/r$ & $+im/r$ \;\checkmark \\
-$(2,1)$ & $(+1)(+\partial_z)(-1) = -\partial_z$ & $+\partial_z$ \\
-$(2,3)$ & $(+1)(-\partial_r)(+1) = -\partial_r$ & $-\partial_r$ \;\checkmark \\
-$(3,1)$ & $(+1)(+im/r)(-1) = -im/r$ & $-im/r$ \;\checkmark \\
-$(3,2)$ & $(+1)\tfrac{1}{r}\partial_r(r\,\cdot\,)(+1) = +\tfrac{1}{r}\partial_r(r\,\cdot\,)$
-        & $+\tfrac{1}{r}\partial_r(r\,\cdot\,)$ \;\checkmark
-\end{tabular}
-\end{center}
-Entries $(1,2)$ and $(2,1)$ differ by a sign: $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = +\mathcal{D}_m$
-for the diagonal and $(1,3),(3,1),(2,3),(3,2)$ entries, but
-$= -\mathcal{D}_m$ for the $(1,2)$ and $(2,1)$ entries.
-
-More precisely, one finds $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = \mathcal{D}_m$
-(all entries match).  To verify: $(1,2)$: $(-1)(-\partial_z)(+1) = \partial_z$, but
-$(\mathcal{D}_m)_{12} = -\partial_z$.  So this entry does \emph{not} match.
-
-The resolution: $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma \ne \mathcal{D}_m$ in general,
-but the \emph{product} still satisfies
-$(\hat\sigma\mathcal{D}_{-m}\hat\sigma)^2 = \mathcal{D}_m^2$
-because the sign discrepancies cancel upon squaring.
-
-Let us verify this directly.  Define $\mathcal{C} \equiv \hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma$.
-A systematic computation gives, for \emph{both} choices of $\hat\sigma$:
-
-\medskip
-\noindent
-\textbf{Case 1} ($\hat\sigma = \mathrm{diag}(-1,1,1)$, y-pol):
-$\mathcal{C} = +\mathcal{D}_m$ for entries $(1,3),(2,3),(3,1),(3,2)$ and
-$\mathcal{C} = -\mathcal{D}_m$ for entries $(1,2),(2,1)$.
-That is, $\mathcal{C}_{ij} = (-1)^{\delta_{ij\in\{12,21\}}}\,(\mathcal{D}_m)_{ij}$.
-Squaring: in $\mathcal{C}^2$, each product of two entries picks up
-$(-1)^{n_{\mathrm{flipped}}}$ signs that cancel pairwise, giving $\mathcal{C}^2 = \mathcal{D}_m^2$.
-
-\medskip
-\noindent
-\textbf{Case 2} ($\hat\sigma = \mathrm{diag}(1,-1,1)$, x-pol):
-A similar entry-by-entry computation gives
-$\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = -\mathcal{D}_m$ (every off-diagonal
-entry flips sign).  Squaring: $(-\mathcal{D}_m)^2 = \mathcal{D}_m^2$.  \checkmark
-
-\medskip
-\noindent
-Both cases can be verified by symbolic computation in Mathematica:
-\begin{verbatim}
-  D1 = {{0, -z, t}, {z, 0, -r}, {-t, rr, 0}};    (* D_m with im/r -> t *)
-  D2 = {{0, -z, -t}, {z, 0, -r}, {t, rr, 0}};     (* D_{-m} *)
-  S  = DiagonalMatrix[{-1, 1, 1}];                  (* y-pol sigma *)
-  Simplify[S.D2.D2.S - D1.D1]   (* == zero matrix *)
-\end{verbatim}
-The key point: $\hat\sigma^2 = I$ and $s_r s_\theta = -1$ guarantee that the
-curl-curl operator is invariant under the combined transformation
-$m \to -m$, $\E \to \hat\sigma\E$.
-
-
-\subsection{Source symmetry for y-polarized illumination}
-
-For $y$-polarized illumination at oblique angle $\alpha$ in the $xz$-plane ($\varphi=0$),
-the incident field is
+The incident field $\E_{\mathrm{inc}} = E_0\,e^{ik_x x}\,\yhat$ satisfies
+$\sigma_y[\E_{\mathrm{inc}}] = -\E_{\mathrm{inc}}$ (the spatial phase is independent
+of $y$, while the $\yhat$-component picks up a minus sign from the reflection).
+For a structure with $\epsilon(x,-y,z) = \epsilon(x,y,z)$, Maxwell's equations
+are invariant under $\sigma_y$, so $\sigma_y[\E]$ solves the same equation with
+source $\sigma_y[\E_{\mathrm{inc}}] = -\E_{\mathrm{inc}}$.  By linearity and
+uniqueness:
 \begin{equation}
-  \E_{\mathrm{inc}} = e^{ik\sin\alpha\cdot x}\,\yhat
-  = e^{ik_x r\cos\theta}\,(\sin\theta\,\rhat + \cos\theta\,\that).
+  \sigma_y[\E] = -\E.
 \end{equation}
-Under the reflection $\theta \to -\theta$ (i.e.\ $y \to -y$):
+Taking the $y$-component: $-E_y(x,-y,z) = -E_y(x,y,z)$, hence
+\begin{equation}
+  E_y(x,-y,z) = E_y(x,y,z).
+\end{equation}
+Since $u \equiv E_y$ and $\theta \to -\theta$ corresponds to $y \to -y$ at fixed $r$,
+we have $u(r,-\theta) = u(r,\theta)$.
+
+Taking the Fourier coefficient:
+\begin{equation}
+  u_{-m}(r) = \frac{1}{2\pi}\int_0^{2\pi} u(r,\theta)\,e^{im\theta}\,d\theta
+  = \frac{1}{2\pi}\int_0^{2\pi} u(r,-\theta')\,e^{-im\theta'}\,d\theta'
+  = u_m(r),
+\end{equation}
+where we substituted $\theta' = -\theta$.
+
+\subsection{From modal symmetry to spectral symmetry}
+
+Since the spectral coefficient uses the Hankel transform at order~$m$
+(see~\eqref{eq:am_scalar}), the Bessel reflection $J_{-m}(x) = (-1)^m J_m(x)$
+introduces a sign:
 \begin{align}
-  E_r(r,-\theta) &= e^{ik_x r\cos\theta}\sin(-\theta) = -e^{ik_x r\cos\theta}\sin\theta = -E_r(r,\theta),\\
-  E_\theta(r,-\theta) &= e^{ik_x r\cos\theta}\cos(-\theta) = e^{ik_x r\cos\theta}\cos\theta = +E_\theta(r,\theta).
+  a_{-m}(k_r)
+  &= \int_0^\infty u_{-m}(r)\,J_{-m}(k_r r)\,r\,dr
+  = \int_0^\infty u_m(r)\,(-1)^m\,J_m(k_r r)\,r\,dr
+  = (-1)^m\,a_m(k_r).
 \end{align}
-Taking the $m$-th Fourier coefficient ($\int e^{-im\theta}d\theta$ maps $\theta\to-\theta$ to $m\to-m$):
+Since propagation is a pointwise multiplication by $e^{ik_z f}$ (same for all $m$):
 
-\begin{tcolorbox}[title=$y$-polarization symmetry]
-\begin{equation}\label{eq:Esym_ypol}
-  \hat\sigma = \mathrm{diag}(-1,+1,+1):\qquad
-  E_{-m,r} = -E_{m,r},\quad E_{-m,\theta} = +E_{m,\theta}.
+\begin{tcolorbox}[title=Scalar symmetry]
+\begin{equation}\label{eq:scalar_sym}
+  u_{-m} = u_m
+  \qquad\Longrightarrow\qquad
+  a_{-m}(k_r) = (-1)^m\,a_m(k_r)
+  \qquad\Longrightarrow\qquad
+  \tilde a_{-m}(k_r) = (-1)^m\,\tilde a_m(k_r).
 \end{equation}
 \end{tcolorbox}
 
 \noindent
-For comparison, $x$-polarized illumination ($\xhat = \cos\theta\,\rhat - \sin\theta\,\that$) gives:
-\begin{equation}\label{eq:Esym_xpol}
-  \hat\sigma = \mathrm{diag}(+1,-1,+1):\qquad
-  E_{-m,r} = +E_{m,r},\quad E_{-m,\theta} = -E_{m,\theta}.
-\end{equation}
+The $(-1)^m$ factor is \emph{not} a peculiarity of the TE/TM decomposition ---
+it is inherent in the cylindrical harmonic basis via
+$J_{-m} = (-1)^m J_m$.  The scalar formulation still gives simpler symmetry
+than the TE/TM case, where the TE and TM coefficients have \emph{different}
+$(-1)^m$ vs $(-1)^{m+1}$ signs (Appendix~\ref{app:TETM}).
 
-Both are valid instances of the curl-curl symmetry with $s_r s_\theta = -1$.
-
-
-\subsection{Hankel transform under order negation}
-
-For any function $f(r)$:
-\begin{equation}\label{eq:HT_neg}
-  \HT_{-\nu}[f](k_r)
-  = \int_0^\infty f(r)\,J_{-\nu}(k_r r)\,dr
-  = (-1)^\nu\,\HT_\nu[f](k_r),
-\end{equation}
-using $J_{-\nu}(x) = (-1)^\nu J_\nu(x)$.  In particular:
-\begin{equation}\label{eq:HT_neg_specific}
-  \HT_{-m+1}[f] = (-1)^{m+1}\HT_{m-1}[f],\qquad
-  \HT_{-m-1}[f] = (-1)^{m+1}\HT_{m+1}[f].
-\end{equation}
-
-
-\subsection{TE and TM symmetry for y-polarization}
-
-Substitute $E_{-m,r} = -E_{m,r}$, $E_{-m,\theta} = +E_{m,\theta}$
-into~\eqref{eq:ATE} for mode $-m$:
-\begin{align}
-  A^{\mathrm{TE}}_{-m}
-  &= \frac{i}{2}\bigl[\HT_{-m+1}[-rE_{m,r}] + \HT_{-m-1}[-rE_{m,r}]\bigr]
-   + \frac{1}{2}\bigl[\HT_{-m-1}[+rE_{m,\theta}] - \HT_{-m+1}[+rE_{m,\theta}]\bigr]
-  \nonumber\\[4pt]
-  &= -\frac{i}{2}(-1)^{m+1}\bigl[\HT_{m-1}[rE_{m,r}] + \HT_{m+1}[rE_{m,r}]\bigr]
-  \nonumber\\
-  &\quad +\frac{1}{2}(-1)^{m+1}\bigl[\HT_{m+1}[rE_{m,\theta}] - \HT_{m-1}[rE_{m,\theta}]\bigr]
-  \nonumber\\[4pt]
-  &= (-1)^{m+1}\Bigl\{
-    -\frac{i}{2}[\HT_{m+1}+\HT_{m-1}](rE_{m,r})
-    -\frac{1}{2}[\HT_{m-1}-\HT_{m+1}](rE_{m,\theta})
-  \Bigr\}
-  \nonumber\\[4pt]
-  &= (-1)^{m+1}\cdot(-1)\cdot A^{\mathrm{TE}}_m
-  = (-1)^{m}\,A^{\mathrm{TE}}_m. \qquad\checkmark
-\end{align}
-
-Similarly for TM (substituting $E_{-m,r}=-E_{m,r}$, $E_{-m,\theta}=+E_{m,\theta}$
-and following the same steps):
-\begin{equation}
-  A^{\mathrm{TM}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TM}}_m. \qquad\checkmark
-\end{equation}
-
-\begin{tcolorbox}[title=$y$-polarization symmetry relations]
-\begin{equation}\label{eq:sym_ypol}
-  A^{\mathrm{TE}}_{-m} = (-1)^{m}\,A^{\mathrm{TE}}_m, \qquad
-  A^{\mathrm{TM}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TM}}_m.
-\end{equation}
-Combined propagated coefficient:
-\begin{equation}\label{eq:Atilde_neg_ypol}
-  \tilde A_{-m} = (-1)^m\,\bigl[A^{\mathrm{TE}}_m - A^{\mathrm{TM}}_m\bigr]\cdot e^{ik_z f}.
-\end{equation}
-\end{tcolorbox}
-
-
-\subsection{Summary for both polarizations}
-
-\begin{center}
-\begin{tabular}{@{}lccc@{}}
-\toprule
-\textbf{Polarization} & $\hat\sigma$ & $A^{\mathrm{TE}}_{-m}$ & $A^{\mathrm{TM}}_{-m}$ \\
-\midrule
-$y$-pol ($s$-pol) & $\mathrm{diag}(-1,+1,+1)$
-  & $(-1)^m A^{\mathrm{TE}}_m$ & $(-1)^{m+1} A^{\mathrm{TM}}_m$ \\[4pt]
-$x$-pol ($p$-pol) & $\mathrm{diag}(+1,-1,+1)$
-  & $(-1)^{m+1} A^{\mathrm{TE}}_m$ & $(-1)^m A^{\mathrm{TM}}_m$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\medskip
-\noindent
-Combined propagated coefficients:
-\begin{align}
-  \text{$y$-pol:}\quad \tilde A_{-m} &= (-1)^m\,(A^{\mathrm{TE}}_m - A^{\mathrm{TM}}_m)\,e^{ik_z f},
-  \label{eq:Atilde_neg_y}\\[4pt]
-  \text{$x$-pol:}\quad \tilde A_{-m} &= (-1)^m\,(A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m)\,e^{ik_z f}.
-  \label{eq:Atilde_neg_x}
-\end{align}
-The two differ only by a sign in the (TE$-$TM) vs (TM$-$TE) ordering.
-
-\noindent
-\textbf{Consequence:} For either polarization, only $m = 0,1,\ldots,M_{\max}$
-need be computed.  An implementation should accept a polarization flag to select
-the correct sign in the negative-$m$ reconstruction.
+Only $m = 0, 1, \ldots, M_{\max}$ need to be computed; the negative-$m$
+coefficients are obtained by a single sign flip.
 
 
 %=======================================================================
@@ -842,13 +558,16 @@ wavelengths), the FFTLog grid overhead is acceptable.
 \label{sec:propagation}
 %=======================================================================
 
-At $z = f$, each eigenmode acquires the phase $e^{ik_z z}$.  Combining TE+TM:
+At $z = f$, each eigenmode acquires the phase $e^{ik_z z}$:
 \begin{equation}\label{eq:prop}
-  \tilde A_m(k_r)
-  = \bigl[A^{\mathrm{TE}}_m(k_r) + A^{\mathrm{TM}}_m(k_r)\bigr]\,e^{ik_z f},
+  \tilde a_m(k_r)
+  = a_m(k_r)\,e^{ik_z f},
   \qquad k_z = \sqrt{k^2 - k_r^2}.
 \end{equation}
 Evanescent modes ($k_r > k \Rightarrow k_z$ imaginary) are set to zero.
+
+The negative-$m$ coefficients are reconstructed via the scalar symmetry
+relation~\eqref{eq:scalar_sym}: $\tilde a_{-m} = (-1)^m\,\tilde a_m$.
 
 
 %=======================================================================
@@ -870,24 +589,24 @@ Graf's addition theorem (DLMF \S10.23.7) states that for $\rho < x_0$:
 
 The far field at $z=f$ in the global frame is
 \begin{equation}
-  E(r,\theta,f) = \sum_n\Bigl[\int_0^k \tilde A_n(k_r)\,J_n(k_r r)\,k_r\,dk_r\Bigr]e^{in\theta}.
+  u(r,\theta,f) = \sum_n\Bigl[\int_0^k \tilde a_n(k_r)\,J_n(k_r r)\,k_r\,dk_r\Bigr]e^{in\theta}.
 \end{equation}
 Insert~\eqref{eq:graf}:
 \begin{align}
-  E(\rho,\psi,f)
-  &= \sum_n\int_0^k \tilde A_n(k_r)\sum_m J_m(k_r x_0)\,J_{n-m}(k_r\rho)\,e^{i(n-m)\psi}\,k_r\,dk_r.
+  u(\rho,\psi,f)
+  &= \sum_n\int_0^k \tilde a_n(k_r)\sum_m J_m(k_r x_0)\,J_{n-m}(k_r\rho)\,e^{i(n-m)\psi}\,k_r\,dk_r.
 \end{align}
 Relabel $l = n - m$ (so $n = m + l$):
 \begin{align}
-  E(\rho,\psi,f)
+  u(\rho,\psi,f)
   &= \sum_l\Bigl[\int_0^k
-    \underbrace{\sum_m \tilde A_{m+l}(k_r)\,J_m(k_r x_0)}_{B_l(k_r)}
+    \underbrace{\sum_m \tilde a_{m+l}(k_r)\,J_m(k_r x_0)}_{B_l(k_r)}
     \,J_l(k_r\rho)\,k_r\,dk_r\Bigr]\,e^{il\psi}.
 \end{align}
 
 \begin{tcolorbox}[title=Local modal coefficients (Graf shift)]
 \begin{equation}\label{eq:Bl}
-  B_l(k_r) = \sum_{|m|\le M_{\max}} \tilde A_{m+l}(k_r)\,J_m(k_r x_0),
+  B_l(k_r) = \sum_{|m|\le M_{\max}} \tilde a_{m+l}(k_r)\,J_m(k_r x_0),
   \qquad |l| \le L_{\max}.
 \end{equation}
 \end{tcolorbox}
@@ -900,7 +619,7 @@ $L_{\max} \approx k\cdot\mathrm{NA}\cdot\rho_{\max}$: for NA${}=0.5$,
 $\rho_{\max}=5\lambda$, $L_{\max}\approx 16 \ll M_{\max}$.
 
 \paragraph{Normal incidence ($\alpha\to 0$).}
-$x_0\to 0$, $J_m(0) = \delta_{m,0}$, so $B_l = \tilde A_l$ (identity).
+$x_0\to 0$, $J_m(0) = \delta_{m,0}$, so $B_l = \tilde a_l$ (identity).
 
 
 %=======================================================================
@@ -919,9 +638,9 @@ Only $2L_{\max}+1$ calls needed.
 \subsection{Angular synthesis (Step~6)}
 
 \begin{equation}\label{eq:psf}
-  E(\rho_j,\psi_s,f) = \sum_{l=-L_{\max}}^{L_{\max}} b_l(\rho_j)\,e^{il\psi_s},
+  u(\rho_j,\psi_s,f) = \sum_{l=-L_{\max}}^{L_{\max}} b_l(\rho_j)\,e^{il\psi_s},
 \end{equation}
-evaluated by IFFT over $l$ at each $\rho_j$.  Take $|E|^2$ for PSF intensity.
+evaluated by IFFT over $l$ at each $\rho_j$.  Take $|u|^2$ for PSF intensity.
 
 
 %=======================================================================
@@ -951,8 +670,8 @@ The $m$-th mode of $u(r,\theta) = t(r)\,e^{ik_x r\cos\theta}$ is
 $u_m(r) = i^m\,t(r)\,J_m(k_x r)$
 (absorbing $2\pi$ into normalization conventions).  The scalar spectral coefficient is
 \begin{equation}\label{eq:am}
-  a_m(k_r) = k_r\int_0^\infty u_m(r)\,J_m(k_r r)\,r\,dr
-  = i^m\,k_r\int_0^\infty t(r)\,J_m(k_x r)\,J_m(k_r r)\,r\,dr.
+  a_m(k_r) = \int_0^\infty u_m(r)\,J_m(k_r r)\,r\,dr
+  = i^m\int_0^\infty t(r)\,J_m(k_x r)\,J_m(k_r r)\,r\,dr.
 \end{equation}
 
 \subsection{Neumann addition formula: derivation}
@@ -1010,10 +729,10 @@ The net result is:
 
 Substitute~\eqref{eq:neumann} into~\eqref{eq:am}:
 \begin{align}
-  a_m(k_r) &= i^m\,k_r\int_0^\infty t(r)\,
+  a_m(k_r) &= i^m\int_0^\infty t(r)\,
   \Bigl[\frac{1}{2\pi}\int_0^{2\pi} J_0(c(\varphi)\,r)\,e^{-im\varphi}\,d\varphi\Bigr]\,r\,dr
   \nonumber\\[4pt]
-  &= \frac{i^m\,k_r}{2\pi}\int_0^{2\pi}\Bigl[
+  &= \frac{i^m}{2\pi}\int_0^{2\pi}\Bigl[
     \underbrace{\int_0^\infty r\,t(r)\,J_0(c(\varphi)\,r)\,dr}_{T_0(c(\varphi))}
   \Bigr]\,e^{-im\varphi}\,d\varphi,
 \end{align}
@@ -1025,7 +744,7 @@ Hankel transform:
 
 \begin{tcolorbox}[title=Neumann shift theorem (final)]
 \begin{equation}\label{eq:neumann_shift}
-  a_m(k_r) = \frac{i^m\,k_r}{2\pi}\int_0^{2\pi}
+  a_m(k_r) = \frac{i^m}{2\pi}\int_0^{2\pi}
     T_0\!\bigl(\sqrt{k_r^2+k_x^2-2k_r k_x\cos\varphi}\,\bigr)\;
     e^{-im\varphi}\,d\varphi.
 \end{equation}
@@ -1095,32 +814,31 @@ $\rho_1 = 3.8317/(k\cdot\mathrm{NA}_{\mathrm{eff}}) = 0.6098\,\lambda/\mathrm{NA
 \section{Complete Algorithm Summary}
 %=======================================================================
 
-\begin{tcolorbox}[title=CyFFP: Standard Path]
-\textbf{Inputs:} $E_r$, $E_\theta$ on log-spaced $r$, uniform $\theta$;\;
+\begin{tcolorbox}[title=CyFFP: Scalar Standard Path]
+\textbf{Inputs:} $u(r,\theta)$ on log-spaced $r$, uniform $\theta$;\;
 $k$, $\alpha$, $f$.
 
 \medskip
-\textbf{Step 1} --- Angular FFT: $E_{m,r/\theta}$ for $m = 0,\ldots,M_{\max}$.
+\textbf{Step 1} --- Angular FFT: $u_m(r)$ for $m = 0,\ldots,M_{\max}$.
 
-\textbf{Step 2} --- Forward Hankel (FFTLog, orders $m\pm 1$):
-$A^{\mathrm{TE}}_m$, $A^{\mathrm{TM}}_m$.
+\textbf{Step 2} --- Forward Hankel (FFTLog, order $m$):
+$a_m(k_r) = \HT_m[r\,u_m](k_r)$.  One transform per mode.
 
 \textbf{Step 3} --- Propagation + symmetry:
-$\tilde A_m = (A^{\mathrm{TE}}_m+A^{\mathrm{TM}}_m)e^{ik_z f}$;\;
-$\tilde A_{-m} = (-1)^m(A^{\mathrm{TE}}_m - A^{\mathrm{TM}}_m)e^{ik_z f}$ ($y$-pol)
-or $(A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m)$ ($x$-pol); see~\eqref{eq:Atilde_neg_y}--\eqref{eq:Atilde_neg_x}.
+$\tilde a_m = a_m\,e^{ik_z f}$;\;
+$\tilde a_{-m} = (-1)^m\,\tilde a_m$ (scalar symmetry).
 
-\textbf{Step 4} --- Graf shift: $B_l = \sum_m \tilde A_{m+l}\,J_m(k_r x_0)$.
+\textbf{Step 4} --- Graf shift: $B_l = \sum_m \tilde a_{m+l}\,J_m(k_r x_0)$.
 
 \textbf{Step 5} --- Inverse Hankel: $b_l(\rho) = \HT_l[k_r B_l](\rho)$.
 
-\textbf{Step 6} --- Angular IFFT: $E(\rho,\psi) = \sum_l b_l\,e^{il\psi}$.
+\textbf{Step 6} --- Angular IFFT: $u(\rho,\psi) = \sum_l b_l\,e^{il\psi}$.
 \end{tcolorbox}
 
 \begin{tcolorbox}[title=CyFFP: Neumann Fast Path (LPA/scalar)]
 \textbf{Step A} --- One FFTLog: $T_0 = \HT_0[r\,t(r)]$.
 
-\textbf{Step B} --- Per $k_r$: $\tilde A_m = i^m k_r\,\mathrm{FFT}_\varphi\{T_0(c(\varphi))\}[m]\cdot e^{ik_z f}$.
+\textbf{Step B} --- Per $k_r$: $\tilde a_m = i^m\,\mathrm{FFT}_\varphi\{T_0(c(\varphi))\}[m]\cdot e^{ik_z f}$.
 
 \textbf{Steps 4--6} --- Unchanged.
 \end{tcolorbox}
@@ -1134,7 +852,7 @@ or $(A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m)$ ($x$-pol); see~\eqref{eq:Atilde_neg
 The most straightforward alternative is to place the near field on a 2D Cartesian
 grid and propagate via 2D FFT (angular spectrum method):
 \begin{enumerate}[nosep]
-  \item Sample $\E(x,y,0)$ on a uniform grid with spacing $\Delta x \le \lambda/2$
+  \item Sample $u(x,y,0)$ on a uniform grid with spacing $\Delta x \le \lambda/2$
         covering $[-R, R]^2$.
   \item 2D FFT $\to$ angular spectrum $U(k_x, k_y)$.
   \item Multiply by $e^{ik_z f}$, zero out evanescent modes.
@@ -1224,7 +942,7 @@ $L_{\max} \approx k\cdot\mathrm{NA}\cdot\rho_{\max}$. For
 $\rho_{\max} = 5\lambda = 2.5\,\mu\text{m}$:
 $L_{\max} \approx 12.57 \times 0.25 \times 2.5 + 5 \approx \mathbf{13}$.
 
-\subsection{Cost per step: standard path}
+\subsection{Cost per step: scalar standard path}
 
 Each FFTLog call costs $O(N_r\log N_r) \approx 131072 \times 17 \approx 2.2\times 10^6$
 operations, or approximately 0.2\,ms on a modern CPU.
@@ -1235,9 +953,9 @@ operations, or approximately 0.2\,ms on a modern CPU.
 \textbf{Step} & \textbf{Work} & \textbf{1 core} & \textbf{300 thr.}\\
 \midrule
 \textbf{2.}\ Forward HT
-  & $2183$ modes $\times$ 2 FFTLog (if $E_\theta=0$)
-    $= 4366$ calls
-  & 6\,s & 22\,ms \\[4pt]
+  & $2183$ modes $\times$ 1 FFTLog each
+    $= 2183$ calls
+  & 3\,s & 11\,ms \\[4pt]
 \textbf{3.}\ Propagation + sym.
   & $131072 \times 4365$ pointwise ops
   & 20\,ms & 20\,ms \\[4pt]
@@ -1252,10 +970,15 @@ operations, or approximately 0.2\,ms on a modern CPU.
   & $131072$ IFFTs of length $N_\psi$
   & 1.3\,s & 5\,ms \\[4pt]
 \midrule
-\textbf{Total} & & ${\sim}\mathbf{10\,s}$ & ${\sim}\mathbf{60\,ms}$ \\
+\textbf{Total} & & ${\sim}\mathbf{7\,s}$ & ${\sim}\mathbf{50\,ms}$ \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\noindent
+Compared to the TE/TM vector path (which would require 4 transforms per mode
+in Step~2), the scalar path saves a factor of ${\sim}2$--$4\times$ on the
+most expensive step.
 
 \subsection{Cost per step: Neumann shift fast path}
 
@@ -1286,12 +1009,12 @@ The Neumann shift theorem (\S\ref{sec:neumann}) replaces Step~2 entirely.
 \begin{center}
 \begin{tabular}{@{}lccc@{}}
 \toprule
-& \textbf{Cartesian 2D FFT} & \textbf{CyFFP standard} & \textbf{CyFFP Neumann} \\
+& \textbf{Cartesian 2D FFT} & \textbf{CyFFP scalar} & \textbf{CyFFP Neumann} \\
 \midrule
 Grid points     & $16384^2 \approx 2.7\times 10^8$ & $131072$ (1D) & $131072$ (1D) \\
 Memory          & ${\sim}10$\,GB        & ${\sim}0.5$\,GB   & ${\sim}0.5$\,GB \\
-Time (1 core)   & ${\sim}3$\,s          & ${\sim}10$\,s       & ${\sim}5$\,s \\
-Time (300 thr.) & ${\sim}1$\,s          & ${\sim}60$\,ms     & ${\sim}25$\,ms \\
+Time (1 core)   & ${\sim}3$\,s          & ${\sim}7$\,s       & ${\sim}5$\,s \\
+Time (300 thr.) & ${\sim}1$\,s          & ${\sim}50$\,ms     & ${\sim}25$\,ms \\
 Scaling with $R/\lambda$ & $(R/\lambda)^2$ & $R/\lambda$    & $R/\lambda$ \\
 Output          & Full focal plane      & PSF patch only     & PSF patch only \\
 \bottomrule
@@ -1299,7 +1022,7 @@ Output          & Full focal plane      & PSF patch only     & PSF patch only \\
 \end{center}
 
 \noindent
-The cylindrical approach is ${\sim}40$--$50\times$ faster than Cartesian on 300 threads,
+The cylindrical approach is ${\sim}20$--$40\times$ faster than Cartesian on 300 threads,
 uses ${\sim}20\times$ less memory, and scales linearly rather than quadratically
 with the optical size $R/\lambda$.  For lenses beyond ${\sim}5$\,mm at visible
 wavelengths, the Cartesian approach becomes memory-limited on commodity hardware
@@ -1322,13 +1045,8 @@ An efficient implementation should incorporate the following:
 \midrule
 Negative-$m$ symmetry
   & $2\times$ on Step~2
-  & Compute only $m \ge 0$; reconstruct $m < 0$ algebraically
-    via~\eqref{eq:Atilde_neg_y}/\eqref{eq:Atilde_neg_x}. \\[6pt]
-$E_\theta = 0$ detection
-  & $2\times$ on Step~2
-  & When $E_{m,\theta} \equiv 0$ (common for scalar-like fields),
-    the two $\theta$-component FFTLog calls can be skipped entirely,
-    reducing Step~2 from 4 to 2 FFTLog calls per mode. \\[6pt]
+  & Compute only $m \ge 0$; reconstruct $m < 0$ by
+    $\tilde a_{-m} = (-1)^m\tilde a_m$ (scalar). \\[6pt]
 Neumann shift (LPA fields)
   & ${\sim}M_{\max}\times$ on Step~2
   & For fields of the form $t(r)\,e^{ik_x r\cos\theta}$, replace
@@ -1345,15 +1063,15 @@ Miller backward recurrence
   & Compute $J_0(x), \ldots, J_{M}(x)$ via the recurrence
     $J_{m-1}(x) = (2m/x)\,J_m(x) - J_{m+1}(x)$,
     starting from $J_{m_{\mathrm{start}}} = 1$, $J_{m_{\mathrm{start}}+1} = 0$
-    and normalising against $J_0(x)$.
+    and normalising via the self-normalizing identity
+    $1 = J_0(x) + 2\sum_{k\ge 1} J_{2k}(x)$.
     The starting index must satisfy
-    $m_{\mathrm{start}} \ge M + \max(30,\, 15\sqrt{x})$;
-    starting too far above $x$ overflows for small $x$.
-    Use $J_{-m}(x) = (-1)^m J_m(x)$ for negative orders.
-    \textbf{Caution:} the coefficient is $2m/x$, not $2(m{+}1)/x$. \\[6pt]
+    $m_{\mathrm{start}} \ge \max(M, \lceil|x|\rceil) + \max(30,\, 15\sqrt{|x|})$.
+    \textbf{Caution:} the coefficient is $2m/x$, not $2(m{+}1)/x$;
+    overflow protection (periodic rescaling) is needed for large~$x$. \\[6pt]
 SIMD vectorization
   & $2$--$4\times$ on Step~4
-  & The inner loop $\sum_m \tilde A_{m+l}\,J_m$ is a dot product
+  & The inner loop $\sum_m \tilde a_{m+l}\,J_m$ is a dot product
     over contiguous memory and should be marked for SIMD
     auto-vectorization. \\[6pt]
 Shared-memory threading
@@ -1383,17 +1101,128 @@ be created once (single-threaded) before entering the parallel region.
 
 A well-designed implementation should provide at least three entry points:
 \begin{enumerate}[nosep]
-  \item \textbf{Full-field driver}: accepts $\E(r,\theta)$ on a 2D grid, performs
+  \item \textbf{Full-field driver}: accepts $u(r,\theta)$ on a 2D grid, performs
         the angular FFT (Step~1) internally, then runs Steps 2--6.
         Useful for validation with analytical 2D fields.
-  \item \textbf{Modal driver}: accepts pre-decomposed modes $E_{m,r}(r)$,
-        $E_{m,\theta}(r)$ for $m \ge 0$ directly from FDTD/RCWA.
+  \item \textbf{Modal driver}: accepts pre-decomposed modes $u_m(r)$
+        for $m \ge 0$ directly from FDTD/RCWA.
         Skips Step~1 entirely.  This is the primary production interface.
   \item \textbf{Neumann shift driver}: accepts only the radial transmission $t(r)$
         and the oblique angle.  Uses the Neumann shift theorem (\S\ref{sec:neumann})
         to bypass per-mode FFTLog calls.  Applicable when the near field factors as
         $t(r)\cdot e^{ik_x r\cos\theta}$ (LPA / angle-insensitive metalens model).
 \end{enumerate}
+
+
+%=======================================================================
+\appendix
+\section{Vector TE/TM Formulation}
+\label{app:TETM}
+%=======================================================================
+
+This appendix presents the full vector TE/TM decomposition.  It is retained
+for completeness and for future extensions to full-vector PSF computation
+(both Cartesian components).
+
+\textbf{Important caveat:} In the scalar pipeline (which is the primary
+formulation used in CyFFP), the combined coefficient
+$\tilde A_m = A^{\mathrm{TE}}_m + A^{\mathrm{TM}}_m$ is \emph{not} used.
+Naively combining TE and TM coefficients conflates different Bessel structures
+for the $r$- and $\theta$-components and produces incorrect PSF results (e.g.,
+the PSF peak shifts away from $\rho = 0$).  The scalar coefficient
+$a_m = \HT_m[r\,u_m]$ (\S\ref{sec:scalar_coeffs}) is the correct approach
+for a single Cartesian polarization component.
+
+\subsection{Scalar Helmholtz equation in cylindrical coordinates}
+
+In a source-free region, the electric and magnetic fields can be derived from
+scalar potentials satisfying the Helmholtz equation
+\begin{equation}\label{eq:helmholtz}
+  \nabla^2\psi + k^2\psi = 0,\qquad k = \frac{2\pi n}{\lambda} = \omega\sqrt{\mu\epsilon}.
+\end{equation}
+In cylindrical coordinates:
+\begin{equation}
+  \frac{1}{r}\frac{\partial}{\partial r}\Bigl(r\frac{\partial\psi}{\partial r}\Bigr)
+  + \frac{1}{r^2}\frac{\partial^2\psi}{\partial\theta^2}
+  + \frac{\partial^2\psi}{\partial z^2}
+  + k^2\psi = 0.
+\end{equation}
+Separation of variables $\psi = R(r)\,\Theta(\theta)\,Z(z)$ gives:
+\begin{itemize}[nosep]
+  \item $Z'' = -k_z^2 Z$ \;$\Rightarrow$\; $Z = e^{\pm ik_z z}$,
+  \item $\Theta'' = -m^2\Theta$ \;$\Rightarrow$\; $\Theta = e^{im\theta}$,
+  \item $r(rR')' + (k_r^2 r^2 - m^2)R = 0$ \;$\Rightarrow$\; $R = J_m(k_r r)$,
+\end{itemize}
+where $k_r^2 + k_z^2 = k^2$.  The complete solution is
+\begin{equation}\label{eq:psi}
+  \psi = J_m(k_r r)\,e^{im\theta}\,e^{ik_z z}.
+\end{equation}
+
+
+\subsection{TM harmonics}
+
+Set the vector potential $\A/\mu = \bpsi = (0,0,\psi_z)$ with $\psi_z = \psi$ from~\eqref{eq:psi}.
+The tangential electric field (absorbing impedance $\eta$ into the coefficient) is:
+\begin{equation}\label{eq:ETM_tang}
+\boxed{
+  \E^{\mathrm{TM},\perp}_{m,k_r}
+  = \eta\Bigl[
+    -\frac{k_z}{k}\,\frac{\partial J_m(k_r r)}{\partial r}\,\rhat
+    \;-\; i\,\frac{m\,k_z}{k\,r}\,J_m(k_r r)\,\that
+  \Bigr]\,e^{im\theta}\,e^{ik_z z}.
+}
+\end{equation}
+
+
+\subsection{TE harmonics}
+
+Set $\F/\epsilon = \bpsi = (0,0,\psi_z)$.  Then $\E^{\mathrm{TE}} = -\nabla\times\bpsi$:
+\begin{equation}\label{eq:ETE_tang}
+\boxed{
+  \E^{\mathrm{TE},\perp}_{m,k_r}
+  = \Bigl[
+    -\frac{im}{r}\,J_m(k_r r)\,\rhat
+    + \frac{\partial J_m(k_r r)}{\partial r}\,\that
+  \Bigr]\,e^{im\theta}\,e^{ik_z z}.
+}
+\end{equation}
+
+
+\subsection{TE and TM expansion coefficients}
+
+The TE coefficient is obtained by projecting the near field onto $\E^{\mathrm{TE}*}$
+and using Bessel orthogonality.  Substituting recurrence
+relations~\eqref{eq:moverx}--\eqref{eq:dJdr}:
+
+\begin{equation}\label{eq:ATE}
+  A^{\mathrm{TE}}_m(k_r)
+  = \frac{i}{2}\bigl[\HT_{m+1}[r\,E_{m,r}] + \HT_{m-1}[r\,E_{m,r}]\bigr]
+  + \frac{1}{2}\bigl[\HT_{m-1}[r\,E_{m,\theta}] - \HT_{m+1}[r\,E_{m,\theta}]\bigr].
+\end{equation}
+
+Similarly:
+\begin{equation}\label{eq:ATM}
+  A^{\mathrm{TM}}_m(k_r)
+  = -\frac{k_z/k}{2}\bigl[\HT_{m-1}[rE_{m,r}] - \HT_{m+1}[rE_{m,r}]\bigr]
+  - \frac{ik_z/k}{2}\bigl[\HT_{m-1}[rE_{m,\theta}] + \HT_{m+1}[rE_{m,\theta}]\bigr].
+\end{equation}
+
+Each mode requires \textbf{4 Hankel transforms} at orders $m\pm 1$.
+
+
+\subsection{Negative-$m$ symmetry (TE/TM)}
+
+For $y$-polarized illumination ($E_{-m,r} = -E_{m,r}$, $E_{-m,\theta} = +E_{m,\theta}$):
+\begin{equation}\label{eq:sym_ypol}
+  A^{\mathrm{TE}}_{-m} = (-1)^{m}\,A^{\mathrm{TE}}_m, \qquad
+  A^{\mathrm{TM}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TM}}_m.
+\end{equation}
+
+For $x$-polarized illumination ($E_{-m,r} = +E_{m,r}$, $E_{-m,\theta} = -E_{m,\theta}$):
+\begin{equation}\label{eq:sym_xpol}
+  A^{\mathrm{TE}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TE}}_m, \qquad
+  A^{\mathrm{TM}}_{-m} = (-1)^{m}\,A^{\mathrm{TM}}_m.
+\end{equation}
 
 
 %=======================================================================
