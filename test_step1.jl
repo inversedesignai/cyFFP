@@ -263,10 +263,10 @@ for (idx, m) in enumerate(m_pos_11)
     for jr in 1:Nr
         Jmm1 = besselj(m-1, kx * r[jr])
         Jmp1 = besselj(m+1, kx * r[jr])
-        c1 = (im)^(m-1)
-        c2 = (im)^(m+1)
-        exp_r = (c1 * Jmm1 - c2 * Jmp1) / (2im)
-        exp_t = (c1 * Jmm1 + c2 * Jmp1) / 2
+        c1 = Complex(0.0, 1.0)^(m-1)
+        c2 = Complex(0.0, 1.0)^(m+1)
+        exp_r = (c1 * Jmm1 - c2 * Jmp1) / (2.0im)
+        exp_t = (c1 * Jmm1 + c2 * Jmp1) / 2.0
         global max_err_11 = max(max_err_11, abs(Em_r_11[jr, idx] - exp_r))
         global max_err_11 = max(max_err_11, abs(Em_t_11[jr, idx] - exp_t))
     end
