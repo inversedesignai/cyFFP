@@ -682,22 +682,42 @@ This is a convolution $A = g * K_\nu$, so in Fourier space:
 
 \subsection{The filter kernel}
 
-The Fourier transform of $K_\nu(\tau) = J_\nu(e^\tau)$ is (Talman 1978):
+The Mellin transform of $J_\nu(x)$ is
+$\mathcal{M}[J_\nu](s) = 2^{s-1}\,\Gamma\!\bigl(\tfrac{\nu+s}{2}\bigr)
+\big/\Gamma\!\bigl(\tfrac{\nu+2-s}{2}\bigr)$.
+With $x = e^\tau$ and the FFTW convention
+$\hat K(q) = \int K(\tau)\,e^{-iq\tau}\,d\tau$ (corresponding to $s = 1 - iq$):
 \begin{equation}\label{eq:kernel}
+\boxed{
   \hat K_\nu(q)
-  = \frac{\Gamma\!\bigl(\frac{\nu+1+iq}{2}\bigr)}
-         {\Gamma\!\bigl(\frac{\nu+1-iq}{2}\bigr)}\,2^{iq}.
+  = \frac{\Gamma\!\bigl(\frac{\nu+1-iq}{2}\bigr)}
+         {\Gamma\!\bigl(\frac{\nu+1+iq}{2}\bigr)}\,2^{-iq}.
+}
 \end{equation}
-For real $q$ this extends analytically to any real~$\nu$, including $|\nu| \sim 600$.
-The implementation uses
+\textbf{Key property:} the two Gamma arguments are complex conjugates
+(both have real part $(\nu+1)/2$ and imaginary parts $\mp q/2$), so
+$|\hat K_\nu(q)| = 1$ for all $q$.  There is \emph{no overflow} regardless
+of grid size or Bessel order --- in contrast to formulations that use real $q$
+in the Gamma arguments, which grow as $\sim 2^{|q|}$ and overflow for
+$|q| \gtrsim 300$.
+
+The implementation computes~\eqref{eq:kernel} via
 \begin{equation}
   \hat K_\nu(q) = \exp\bigl[
-    \mathrm{loggamma}\!\bigl(\tfrac{\nu+1+iq}{2}\bigr)
-    - \mathrm{loggamma}\!\bigl(\tfrac{\nu+1-iq}{2}\bigr)
-    + iq\log 2
+    \mathrm{loggamma}\!\bigl(\tfrac{\nu+1}{2} - \tfrac{iq}{2}\bigr)
+    - \mathrm{loggamma}\!\bigl(\tfrac{\nu+1}{2} + \tfrac{iq}{2}\bigr)
+    - iq\log 2
   \bigr],
 \end{equation}
 which avoids overflow at large $|\nu|$.
+
+\paragraph{Convention note.}
+Some references (e.g.\ Talman 1978) write the kernel with the opposite sign
+convention ($+iq$ in the numerator, $2^{+iq}$).  This corresponds to the
+$e^{+iq\tau}$ Fourier transform, which is related to the FFTW convention
+by complex conjugation.  An implementation must match the kernel convention
+to the FFT library's sign convention; using the wrong sign produces a kernel
+with $|\hat K| \sim 10^{|q|/3}$ that overflows for large grids.
 
 \subsection{Discrete implementation}
 
