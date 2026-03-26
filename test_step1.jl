@@ -297,6 +297,160 @@ println("  Max symmetry error (m=1..$M_11): $(round(max_err_12, sigdigits=3))")
 println("  PASSED ✓")
 
 
+# ─── Test 13: Ideal oblique lens, 2mm visible, realistic ──────
+println("\n--- Test 13: Ideal oblique lens (2mm, λ=500nm, α=10°) ---")
+# Physical parameters
+lambda_13 = 0.5         # μm (500 nm)
+k_13      = 2π / lambda_13
+f_13      = 8000.0      # μm (focal length for NA≈0.25)
+R_13      = 2000.0      # μm (2 mm aperture)
+alpha_13  = deg2rad(10.0)
+x0_13     = f_13 * tan(alpha_13)
+kx_13     = k_13 * sin(alpha_13)
+
+# Grid: use modest size for testing (not production 2^17)
+Nr_13     = 128
+Ntheta_13 = 256
+r_13      = exp.(range(log(0.05), log(R_13), length=Nr_13))
+theta_13  = range(0.0, 2π, length=Ntheta_13+1)[1:end-1]
+
+M_max_13 = ceil(Int, kx_13 * R_13) + 5
+println("  R=$R_13 μm, f=$f_13 μm, λ=$lambda_13 μm, α=10°")
+println("  M_max = $M_max_13,  Nθ = $Ntheta_13,  Nr = $Nr_13")
+@assert Ntheta_13 >= 2M_max_13 + 1 "Ntheta too small"
+
+# Ideal oblique lens: u(r,θ) = exp(-ik[√((r cosθ − x₀)² + r² sin²θ + f²) − f])
+# Near field: E = u(r,θ) (sinθ r̂ + cosθ θ̂)  [y-polarized]
+function u_oblique(rv, th)
+    d = sqrt((rv * cos(th) - x0_13)^2 + rv^2 * sin(th)^2 + f_13^2)
+    return exp(-im * k_13 * (d - f_13))
+end
+
+println("  Building near field...")
+Er_13 = ComplexF64[u_oblique(r_13[jr], theta_13[jt]) * sin(theta_13[jt])
+                    for jr in 1:Nr_13, jt in 1:Ntheta_13]
+Et_13 = ComplexF64[u_oblique(r_13[jr], theta_13[jt]) * cos(theta_13[jt])
+                    for jr in 1:Nr_13, jt in 1:Ntheta_13]
+
+println("  Running angular_decompose...")
+Em_r_13, Em_t_13, m_pos_13 = angular_decompose(Er_13, Et_13, M_max_13)
+
+# --- 13a: Check against explicit numerical integration for selected m's ---
+println("\n  13a: Explicit quadrature vs FFT for selected modes")
+test_modes = [0, 1, 5, 20, 50, M_max_13 - 5]
+max_err_13a = 0.0
+for m in test_modes
+    idx = m + 1   # column index in Em_r_13
+    for jr in [1, Nr_13÷4, Nr_13÷2, 3*Nr_13÷4, Nr_13]  # sample radial points
+        rv = r_13[jr]
+        # Explicit trapezoidal integration: E_{m,r} = (1/Nθ) Σ E_r(r,θ) e^{-imθ}
+        quad_r = sum(Er_13[jr, jt] * exp(-im * m * theta_13[jt]) for jt in 1:Ntheta_13) / Ntheta_13
+        quad_t = sum(Et_13[jr, jt] * exp(-im * m * theta_13[jt]) for jt in 1:Ntheta_13) / Ntheta_13
+        global max_err_13a = max(max_err_13a,
+            abs(Em_r_13[jr, idx] - quad_r),
+            abs(Em_t_13[jr, idx] - quad_t))
+    end
+end
+println("    Max error: $(round(max_err_13a, sigdigits=3))")
+@assert max_err_13a < 1e-10 "FFT vs explicit quadrature mismatch"
+println("    PASSED ✓")
+
+# --- 13b: y-pol symmetry E_{-m,r} = -E_{m,r}, E_{-m,θ} = +E_{m,θ} ---
+println("\n  13b: y-pol symmetry (from full FFT)")
+full_r_13 = fft(Er_13, 2) ./ Ntheta_13
+full_t_13 = fft(Et_13, 2) ./ Ntheta_13
+
+max_err_13b = 0.0
+for m in 1:min(M_max_13, 50)  # check first 50 modes
+    idx_pos = m + 1
+    idx_neg = mod(-m, Ntheta_13) + 1
+    err_r = maximum(abs.(full_r_13[:, idx_neg] .+ full_r_13[:, idx_pos]))  # should be -E_{m,r}
+    err_t = maximum(abs.(full_t_13[:, idx_neg] .- full_t_13[:, idx_pos]))  # should be +E_{m,θ}
+    nrm   = max(maximum(abs.(full_r_13[:, idx_pos])),
+                maximum(abs.(full_t_13[:, idx_pos])), 1e-30)
+    global max_err_13b = max(max_err_13b, err_r / nrm, err_t / nrm)
+end
+println("    Max relative symmetry error (m=1..$(min(M_max_13,50))): $(round(max_err_13b, sigdigits=3))")
+@assert max_err_13b < 1e-10 "y-pol symmetry violated for ideal oblique lens"
+println("    PASSED ✓")
+
+# --- 13c: Parseval — modal energy = physical energy ---
+println("\n  13c: Parseval's theorem")
+max_parseval_err = 0.0
+for jr in 1:Nr_13
+    phys_E_r = sum(abs2.(Er_13[jr, :])) / Ntheta_13
+    phys_E_t = sum(abs2.(Et_13[jr, :])) / Ntheta_13
+    mode_E_r = sum(abs2.(full_r_13[jr, :]))
+    mode_E_t = sum(abs2.(full_t_13[jr, :]))
+    rel_r = abs(phys_E_r - mode_E_r) / (phys_E_r + 1e-30)
+    rel_t = abs(phys_E_t - mode_E_t) / (phys_E_t + 1e-30)
+    global max_parseval_err = max(max_parseval_err, rel_r, rel_t)
+end
+println("    Max relative Parseval error: $(round(max_parseval_err, sigdigits=3))")
+@assert max_parseval_err < 1e-10 "Parseval failed for ideal oblique lens"
+println("    PASSED ✓")
+
+# --- 13d: Mode amplitude decay — should be negligible at M_max ---
+println("\n  13d: Mode amplitude decay near truncation")
+# |E_m| should be small for m near M_max (Bessel decay)
+peak_mode_energy = maximum(sum(abs2.(Em_r_13), dims=1) .+ sum(abs2.(Em_t_13), dims=1))
+tail_energy = sum(abs2.(Em_r_13[:, end])) + sum(abs2.(Em_t_13[:, end]))
+tail_ratio = tail_energy / peak_mode_energy
+println("    Energy at m=$(M_max_13) / peak mode energy: $(round(tail_ratio, sigdigits=3))")
+@assert tail_ratio < 1e-6 "Mode truncation insufficient — tail energy too large"
+println("    PASSED ✓")
+
+# --- 13e: u(r,θ) has symmetry u(r,-θ) = u(r,θ) — check directly ---
+println("\n  13e: Phase symmetry u(r,-θ) = u(r,θ)")
+max_phase_err = 0.0
+for jr in [1, Nr_13÷2, Nr_13]
+    for jt in 1:Ntheta_13÷4
+        th  = theta_13[jt]
+        u1  = u_oblique(r_13[jr], th)
+        u2  = u_oblique(r_13[jr], -th)
+        global max_phase_err = max(max_phase_err, abs(u1 - u2))
+    end
+end
+println("    Max |u(r,θ) - u(r,-θ)|: $(round(max_phase_err, sigdigits=3))")
+@assert max_phase_err < 1e-12 "Oblique lens phase not symmetric in θ"
+println("    PASSED ✓")
+
+# --- 13f: Reconstruction — Σ_m E_m(r) e^{imθ} ≈ E(r,θ) ---
+println("\n  13f: Reconstruction from m≥0 + symmetry vs original field")
+# Reconstruct using both positive and negative modes
+max_recon_err = 0.0
+for jr in [1, Nr_13÷4, Nr_13÷2, Nr_13]
+    for jt in [1, Ntheta_13÷4, Ntheta_13÷2]
+        th = theta_13[jt]
+        recon_r = ComplexF64(0)
+        recon_t = ComplexF64(0)
+        for (idx, m) in enumerate(m_pos_13)
+            phase = exp(im * m * th)
+            recon_r += Em_r_13[jr, idx] * phase
+            recon_t += Em_t_13[jr, idx] * phase
+            if m > 0
+                # y-pol symmetry: E_{-m,r} = -E_{m,r}, E_{-m,θ} = +E_{m,θ}
+                phase_neg = exp(-im * m * th)
+                recon_r += (-Em_r_13[jr, idx]) * phase_neg
+                recon_t += ( Em_t_13[jr, idx]) * phase_neg
+            end
+        end
+        global max_recon_err = max(max_recon_err,
+            abs(recon_r - Er_13[jr, jt]),
+            abs(recon_t - Et_13[jr, jt]))
+    end
+end
+# Normalise by typical field amplitude
+field_scale = maximum(abs.(Er_13)) + 1e-30
+rel_recon = max_recon_err / field_scale
+println("    Max relative reconstruction error: $(round(rel_recon, sigdigits=3))")
+# Tolerance is generous because we truncate at M_max (high modes are lost)
+@assert rel_recon < 1e-3 "Reconstruction from modes too inaccurate"
+println("    PASSED ✓")
+
+println("\n  Test 13 PASSED ✓")
+
+
 println("\n" * "="^60)
 println("All Step 1 tests passed.")
 println("="^60)
