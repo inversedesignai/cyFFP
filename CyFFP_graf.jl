@@ -9,8 +9,11 @@
                                      to focal spot in pure modal space.
                                      No interpolation, no Cartesian regridding.
       3. Negative-m symmetry       — E_{-m} = σ̂ E_m halves the Hankel work.
+      4. Neumann shift theorem     — for LPA fields t(r)·exp(ikₓr cosθ),
+         (scalar fast path)          ALL modal coefficients from ONE low-order
+                                     Hankel transform + FFT over shift angle.
 
-    Algorithm steps:
+    Algorithm steps (standard path):
       1. Angular FFT  : decompose near field into modes m ≥ 0 only
       2. Forward HT   : compute A^{TE/TM}_m(kr) via FFTLog (orders m±1)
       3. Propagate +   : Ã_m = (A^TE + A^TM)·prop,
@@ -19,17 +22,20 @@
       5. Inverse HT   : b_l(ρ)  = H_l^{-1}[kr B_l(kr)](ρ)
       6. Angular IFFT : E(ρ,ψ)  = Σ_l b_l(ρ) exp(il ψ)
 
+    Threading: uses Threads.@threads (shared memory, no serialization).
+    Start Julia with  julia -t N  or set JULIA_NUM_THREADS=N.
+
     Based on notes by Arvin Keshvari (Supervisor: Dr. Zin Lin).
     Dependencies: FFTW, SpecialFunctions
 """
 module CyFFP
 
 using FFTW
-using Distributed
 using SpecialFunctions: loggamma, besselj
 
 export cyfft_farfield,
        cyfft_farfield_modal,
+       cyfft_farfield_shift,
        fftlog_hankel,
        angular_decompose,
        compute_TE_TM_coeffs,
@@ -43,9 +49,7 @@ export cyfft_farfield,
 # ═══════════════════════════════════════════════════════════════
 # §1  FFTLog Hankel Transform
 #     H_ν[f](k) = ∫₀^∞ J_ν(kr) f(r) dr
-#     via log-variable change → convolution → FFT
 #     Filter kernel U(q) = Γ((ν+1+q)/2)/Γ((ν+1-q)/2) * 2^q
-#     evaluated via loggamma for stability at any |ν|.
 # ═══════════════════════════════════════════════════════════════
 
 """
@@ -80,7 +84,6 @@ end
 
 # ═══════════════════════════════════════════════════════════════
 # §2  Step 1 — Angular Decomposition  (m ≥ 0 only)
-#     Negative modes are reconstructed via symmetry in Step 3.
 # ═══════════════════════════════════════════════════════════════
 
 """
@@ -100,7 +103,7 @@ function angular_decompose(Er::Matrix{ComplexF64},
     Em_theta_fft = fft(Etheta, 2) ./ Ntheta
 
     m_pos = collect(0:M_max)
-    idx   = m_pos .+ 1          # FFTW index for m ≥ 0
+    idx   = m_pos .+ 1
     return Em_r_fft[:, idx], Em_theta_fft[:, idx], m_pos
 end
 
@@ -113,10 +116,8 @@ end
 #  A^TM_m(kr) = −(kz/k)/2 [H_{m-1} − H_{m+1}](r E_r)
 #             − i(kz/k)/2 [H_{m-1} + H_{m+1}](r E_θ)
 #
-#  4 FFTLog calls per mode.  Only m = 0,...,M_max computed;
-#  negative-m coefficients follow from symmetry:
-#    A^TE_{-m} = (-1)^{m+1} A^TE_m
-#    A^TM_{-m} = (-1)^m     A^TM_m
+#  Symmetry: A^TE_{-m} = (-1)^{m+1} A^TE_m,
+#            A^TM_{-m} = (-1)^m     A^TM_m
 # ═══════════════════════════════════════════════════════════════
 
 """
@@ -124,7 +125,7 @@ end
     -> (A_TE, A_TM, kr_grid)
 
 Compute TE and TM expansion coefficients for modes m = 0,...,M_max
-via FFTLog (4 calls per mode).  Returns matrices [Nr × (M_max+1)].
+via FFTLog.  Threaded over modes.  Skips E_θ transforms when zero.
 """
 function compute_TE_TM_coeffs(Em_r::Matrix{ComplexF64},
                                Em_theta::Matrix{ComplexF64},
@@ -138,40 +139,36 @@ function compute_TE_TM_coeffs(Em_r::Matrix{ComplexF64},
     kr_grid   = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
     kz_over_k = @. sqrt(max(1.0 - (kr_grid / k)^2, 0.0))
 
-    # Detect if E_theta is identically zero → skip 2 FFTLog calls per mode
     etheta_zero = iszero(Em_theta)
 
-    results = pmap(1:N_modes) do idx
-        m   = m_pos[idx]
-        fr  = r .* Em_r[:, idx]
+    A_TE = zeros(ComplexF64, Nr, N_modes)
+    A_TM = zeros(ComplexF64, Nr, N_modes)
 
-        Hmp1_r  = fftlog_hankel(fr,  dln, Float64(m + 1))
-        Hmm1_r  = fftlog_hankel(fr,  dln, Float64(m - 1))
+    # Warm the FFTW plan cache (thread-safety: first call is single-threaded)
+    fftlog_hankel(zeros(ComplexF64, Nr), dln, 0.0)
+
+    Threads.@threads for idx in 1:N_modes
+        m  = m_pos[idx]
+        fr = r .* Em_r[:, idx]
+
+        Hmp1_r = fftlog_hankel(fr, dln, Float64(m + 1))
+        Hmm1_r = fftlog_hankel(fr, dln, Float64(m - 1))
 
         if etheta_zero
-            col_TE = (im/2) .* (Hmp1_r .+ Hmm1_r)
-            col_TM = -(kz_over_k ./ 2) .* (Hmm1_r .- Hmp1_r)
+            A_TE[:, idx] .= (im/2) .* (Hmp1_r .+ Hmm1_r)
+            A_TM[:, idx] .= -(kz_over_k ./ 2) .* (Hmm1_r .- Hmp1_r)
         else
             fth = r .* Em_theta[:, idx]
             Hmm1_th = fftlog_hankel(fth, dln, Float64(m - 1))
             Hmp1_th = fftlog_hankel(fth, dln, Float64(m + 1))
 
-            col_TE = (im/2)  .* (Hmp1_r  .+ Hmm1_r)  .+
-                     (1.0/2) .* (Hmm1_th .- Hmp1_th)
-
-            col_TM = -(kz_over_k ./ 2) .* (Hmm1_r  .- Hmp1_r)  .-
-                     im .* (kz_over_k ./ 2) .* (Hmm1_th .+ Hmp1_th)
+            A_TE[:, idx] .= (im/2)  .* (Hmp1_r  .+ Hmm1_r)  .+
+                            (1.0/2) .* (Hmm1_th .- Hmp1_th)
+            A_TM[:, idx] .= -(kz_over_k ./ 2) .* (Hmm1_r  .- Hmp1_r)  .-
+                            im .* (kz_over_k ./ 2) .* (Hmm1_th .+ Hmp1_th)
         end
-
-        (col_TE, col_TM)
     end
 
-    A_TE = zeros(ComplexF64, Nr, N_modes)
-    A_TM = zeros(ComplexF64, Nr, N_modes)
-    for (idx, (col_TE, col_TM)) in enumerate(results)
-        A_TE[:, idx] .= col_TE
-        A_TM[:, idx] .= col_TM
-    end
     return A_TE, A_TM, kr_grid
 end
 
@@ -179,20 +176,13 @@ end
 # ═══════════════════════════════════════════════════════════════
 # §4  Step 3 — Propagation + Symmetry Reconstruction
 #
-#  For m ≥ 0:  Ã_m    = (A^TE_m + A^TM_m) · exp(ikz f)
-#  For m < 0:  Ã_{-m} = (-1)^m (A^TM_m − A^TE_m) · exp(ikz f)
-#
-#  Derived from J_{-n}(x) = (-1)^n J_n(x) and the source symmetry
-#  E_{-m,r} = E_{m,r},  E_{-m,θ} = −E_{m,θ}   (cyFFP0 Eqs.65–66).
+#  Ã_m    = (A^TE_m + A^TM_m) · exp(ikz f)
+#  Ã_{-m} = (-1)^m (A^TM_m − A^TE_m) · exp(ikz f)
 # ═══════════════════════════════════════════════════════════════
 
 """
     propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f)
     -> (A_tilde, m_full)
-
-Combine TE+TM, apply propagation phase, and reconstruct negative-m
-modes via symmetry.  Returns A_tilde [Nkr × (2M_max+1)] for
-m = -M_max:M_max, and the corresponding mode list.
 """
 function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
                                    A_TM::Matrix{ComplexF64},
@@ -213,11 +203,9 @@ function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
         ate = @view A_TE[:, ip]
         atm = @view A_TM[:, ip]
 
-        # Positive mode: Ã_m = (A^TE_m + A^TM_m) · prop
         idx_pos = m + M_max + 1
         A_tilde[:, idx_pos] .= (ate .+ atm) .* prop
 
-        # Negative mode: Ã_{-m} = (-1)^m (A^TM_m − A^TE_m) · prop
         if m > 0
             idx_neg = -m + M_max + 1
             s = iseven(m) ? 1.0 : -1.0
@@ -230,19 +218,12 @@ end
 
 
 # ═══════════════════════════════════════════════════════════════
-# §5  Step 4 — Graf's Addition Theorem (Modal Basis Shift)
-#
+# §5  Step 4 — Graf's Addition Theorem
 #  B_l(kr) = Σ_m Ã_{m+l}(kr) J_m(kr x0)
-#
-#  A_tilde_vec is indexed as m = -M_max:M_max, i.e.
-#  A_tilde_vec[j] corresponds to mode m = j − M_max − 1.
 # ═══════════════════════════════════════════════════════════════
 
 """
     graf_shift_one_kr(A_tilde_vec, M_max, kr_x0, L_max) -> B [2L_max+1]
-
-Graf addition theorem for a single kr value.
-Uses direct indexing (no Dict) for speed.
 """
 function graf_shift_one_kr(A_tilde_vec::AbstractVector{ComplexF64},
                             M_max::Int,
@@ -253,7 +234,6 @@ function graf_shift_one_kr(A_tilde_vec::AbstractVector{ComplexF64},
 
     m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
 
-    # Pre-compute Bessel weights as Vector for fast access
     Jw = Vector{Float64}(undef, 2m_cut + 1)
     @inbounds for (i, m) in enumerate(-m_cut:m_cut)
         Jw[i] = besselj(m, kr_x0)
@@ -271,13 +251,8 @@ function graf_shift_one_kr(A_tilde_vec::AbstractVector{ComplexF64},
     return B
 end
 
-
 """
-    graf_shift_all_kr(A_tilde, m_full, kr_grid, x0, L_max)
-    -> B [Nkr × (2L_max+1)]
-
-Apply Graf's addition theorem at every kr point.
-For x0 = 0 (normal incidence), J_m(0) = δ_{m,0}, so B_l = Ã_l.
+    graf_shift_all_kr(A_tilde, m_full, kr_grid, x0, L_max) -> B
 """
 function graf_shift_all_kr(A_tilde::Matrix{ComplexF64},
                             m_full::Vector{Int},
@@ -287,15 +262,11 @@ function graf_shift_all_kr(A_tilde::Matrix{ComplexF64},
     M_max = (length(m_full) - 1) ÷ 2
     Nkr   = length(kr_grid)
     Nl    = 2L_max + 1
+    B     = zeros(ComplexF64, Nkr, Nl)
 
-    rows = pmap(1:Nkr) do ikr
+    Threads.@threads for ikr in 1:Nkr
         kr_x0 = kr_grid[ikr] * x0
-        graf_shift_one_kr(A_tilde[ikr, :], M_max, kr_x0, L_max)
-    end
-
-    B = zeros(ComplexF64, Nkr, Nl)
-    @inbounds for ikr in 1:Nkr
-        B[ikr, :] = rows[ikr]
+        B[ikr, :] = graf_shift_one_kr(A_tilde[ikr, :], M_max, kr_x0, L_max)
     end
     return B
 end
@@ -303,31 +274,23 @@ end
 
 # ═══════════════════════════════════════════════════════════════
 # §6  Step 5 — Inverse Hankel Transforms in the Local Basis
-#
-#  b_l(ρ) = H_l^{-1}[kr B_l(kr)](ρ) = FFTLog_l[ kr · B_l(kr) ]
-#
-#  Only |l| ≤ L_max ≪ M_max calls needed.
 # ═══════════════════════════════════════════════════════════════
 
 """
     local_hankel_inverse(B, kr_grid, dln, L_max) -> b [Nkr × (2L_max+1)]
-
-Inverse Hankel transform in the local cylindrical basis.
 """
 function local_hankel_inverse(B::Matrix{ComplexF64},
                                kr_grid::Vector{Float64},
                                dln::Float64,
                                L_max::Int)
     Nkr = size(B, 1)
+    Nl  = 2L_max + 1
+    b   = zeros(ComplexF64, Nkr, Nl)
 
-    cols = pmap(enumerate(-L_max:L_max)) do (li, l)
+    Threads.@threads for li in 1:Nl
+        l = li - L_max - 1
         integrand = kr_grid .* B[:, li]
-        fftlog_hankel(integrand, dln, Float64(l))
-    end
-
-    b = zeros(ComplexF64, Nkr, 2L_max + 1)
-    for (li, col) in enumerate(cols)
-        b[:, li] .= col
+        b[:, li] .= fftlog_hankel(integrand, dln, Float64(l))
     end
     return b
 end
@@ -338,9 +301,7 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 """
-    synthesize_local_psf(b, L_max, Npsi) -> (psf [Nr×Npsi], psi_grid)
-
-Reconstruct the PSF in local polar coordinates (ρ, ψ) via IFFT over l.
+    synthesize_local_psf(b, L_max, Npsi) -> (psf, psi_grid)
 """
 function synthesize_local_psf(b::Matrix{ComplexF64},
                                L_max::Int,
@@ -349,7 +310,7 @@ function synthesize_local_psf(b::Matrix{ComplexF64},
     psi = collect(range(0.0, 2π, length=Npsi+1)[1:end-1])
     psf = zeros(ComplexF64, Nr, Npsi)
 
-    for j in 1:Nr
+    Threads.@threads for j in 1:Nr
         buf = zeros(ComplexF64, Npsi)
         for (li, l) in enumerate(-L_max:L_max)
             jj       = mod(l, Npsi) + 1
@@ -366,7 +327,6 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 function _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
-    # Check that the kr grid reaches the propagating band
     kr_max = 1.0 / r[1]
     if kr_max < k
         @warn "kr_max = 1/r_min = $(round(kr_max, sigdigits=4)) < k = $(round(k, sigdigits=4)). " *
@@ -374,24 +334,12 @@ function _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
               "Decrease r_min to at most 1/k = $(round(1/k, sigdigits=4))."
     end
 
-    # Step 2: Forward Hankel transforms (m ≥ 0 only — half the work)
     A_TE, A_TM, kr_grid = compute_TE_TM_coeffs(Em_r, Em_theta, m_pos, r, k)
-
-    # Step 3: Propagation + symmetry → full m range
     A_tilde, m_full = propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f)
-
-    # Step 4: Graf shift (mode convolution)
     B = graf_shift_all_kr(A_tilde, m_full, kr_grid, x0, L_max)
-
-    # Step 5: Inverse Hankel transforms in local basis
     b = local_hankel_inverse(B, kr_grid, dln, L_max)
-
-    # Output ρ grid: reciprocal log-grid of kr_grid
     rho_grid = exp.(log(1.0 / kr_grid[end]) .+ dln .* (0:length(kr_grid)-1))
-
-    # Step 6: Angular IFFT → local PSF
     psf, psi_grid = synthesize_local_psf(b, L_max, Npsi)
-
     return psf, rho_grid, psi_grid
 end
 
@@ -401,37 +349,12 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 """
-    cyfft_farfield(Er, Etheta, r, k, alpha, f;
-                   M_buffer=10, L_max=nothing, Npsi=128)
-    -> (psf, rho_grid, psi_grid)
+    cyfft_farfield(Er, Etheta, r, k, alpha, f; ...) -> (psf, rho_grid, psi_grid)
 
-Full near-to-far-field transform using the Graf-shift approach.
-Exploits the E_{-m} = σ̂ E_m symmetry to halve the number of
-Hankel transforms (only m ≥ 0 computed).
+Full near-to-far-field transform.  Exploits E_{-m} = σ̂ E_m symmetry.
 
-**Symmetry assumption:** The input field must arise from x-polarized
-illumination (φ=0) of an axisymmetric structure, so that
-E_{-m,r} = E_{m,r} and E_{-m,θ} = -E_{m,θ} (cyFFP0 Eqs. 65–66).
-This holds for ideal lenses, axisymmetric metalenses under LPA, and
-any rotationally symmetric scatterer.  For other polarizations or
-non-axisymmetric structures, the symmetry does not hold and results
-will be incorrect.
-
-# Arguments
-- `Er`, `Etheta` : complex [Nr × Ntheta] near-field (cylindrical components)
-- `r`            : log-spaced radial grid.  Must satisfy r[j+1]/r[j] = const.
-- `k`            : wavenumber 2π/λ
-- `alpha`        : oblique angle [rad]
-- `f`            : focal length
-- `M_buffer`     : extra angular modes beyond M_max (default 10)
-- `L_max`        : local mode truncation (default: ceil(k*NA*ρ_max) + 5)
-- `Npsi`         : azimuthal output points (default 128)
-
-# Returns
-- `psf`      : complex [Nrho × Npsi] field in local coordinates.
-               Take abs2.(psf) for intensity.
-- `rho_grid` : radial grid for local PSF (same length as input r)
-- `psi_grid` : azimuthal grid [0, 2π)
+**Symmetry assumption:** x-polarized illumination (φ=0) of an axisymmetric
+structure, so E_{-m,r}=E_{m,r} and E_{-m,θ}=-E_{m,θ} (cyFFP0 Eqs.65–66).
 """
 function cyfft_farfield(Er::Matrix{ComplexF64},
                         Etheta::Matrix{ComplexF64},
@@ -440,7 +363,6 @@ function cyfft_farfield(Er::Matrix{ComplexF64},
                         M_buffer::Int = 10,
                         L_max::Union{Int,Nothing} = nothing,
                         Npsi::Int = 128)
-
     R   = maximum(r)
     dln = log(r[2] / r[1])
     x0  = f * tan(alpha)
@@ -455,40 +377,23 @@ function cyfft_farfield(Er::Matrix{ComplexF64},
     end
 
     if x0 > 0 && R > x0
-        @warn "Output rho_grid extends beyond x0 = f·tan(α) = $(round(x0, sigdigits=4)). " *
-              "Graf's addition theorem converges only for ρ < x0. " *
-              "Results at large ρ may be inaccurate."
+        @warn "Output rho_grid may extend beyond x0 = f·tan(α). " *
+              "Graf's theorem converges only for ρ < x0."
     end
 
-    # Step 1: Angular decomposition (m ≥ 0 only)
     Em_r, Em_theta, m_pos = angular_decompose(Er, Etheta, M_max)
-
     return _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
 end
 
 
 # ═══════════════════════════════════════════════════════════════
 # §10  Top-level driver  (from pre-decomposed modal amplitudes)
-#      Input only needs m ≥ 0 — no negative-m simulation required.
 # ═══════════════════════════════════════════════════════════════
 
 """
-    cyfft_farfield_modal(Em_r_pos, Em_theta_pos, r, k, alpha, f;
-                         L_max=nothing, Npsi=128)
-    -> (psf, rho_grid, psi_grid)
+    cyfft_farfield_modal(Em_r_pos, Em_theta_pos, r, k, alpha, f; ...)
 
-Near-to-far-field transform from pre-decomposed modal amplitudes
-for m = 0, 1, ..., M_max.  Negative-m modes are reconstructed
-internally via the symmetry E_{-m,r} = E_{m,r}, E_{-m,θ} = -E_{m,θ}.
-
-This is the entry point when modes come directly from FDTD/RCWA
-simulations — no need to simulate m < 0.
-
-# Arguments
-- `Em_r_pos`     : complex [Nr × (M_max+1)], r-component modes m=0,...,M_max
-- `Em_theta_pos` : complex [Nr × (M_max+1)], θ-component modes m=0,...,M_max
-- `r`            : log-spaced radial grid
-- `k, alpha, f`  : wavenumber, oblique angle, focal length
+From pre-decomposed m ≥ 0 modes.  No negative-m simulation needed.
 """
 function cyfft_farfield_modal(Em_r_pos::Matrix{ComplexF64},
                                Em_theta_pos::Matrix{ComplexF64},
@@ -501,7 +406,6 @@ function cyfft_farfield_modal(Em_r_pos::Matrix{ComplexF64},
 
     M_max = N_modes - 1
     m_pos = collect(0:M_max)
-
     R   = maximum(r)
     dln = log(r[2] / r[1])
     x0  = f * tan(alpha)
@@ -515,12 +419,157 @@ function cyfft_farfield_modal(Em_r_pos::Matrix{ComplexF64},
     end
 
     if x0 > 0 && R > x0
-        @warn "Output rho_grid extends beyond x0 = f·tan(α) = $(round(x0, sigdigits=4)). " *
-              "Graf's addition theorem converges only for ρ < x0. " *
-              "Results at large ρ may be inaccurate."
+        @warn "Output rho_grid may extend beyond x0 = f·tan(α). " *
+              "Graf's theorem converges only for ρ < x0."
     end
 
     return _pipeline(Em_r_pos, Em_theta_pos, m_pos, r, k, f, x0, dln, L_max, Npsi)
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# §11  Neumann shift-theorem fast path  (scalar, LPA fields)
+#
+#  For fields of the form t(r)·exp(ikₓ r cosθ)·x̂, the Neumann
+#  addition formula lets us compute ALL M_max scalar modal
+#  coefficients from a SINGLE order-0 Hankel transform:
+#
+#    T₀(k) = H₀[r · t(r)](k)           — one FFTLog call
+#
+#    a_m(kr) = (-i)^m kr ∫ t(r) Jm(kx r) Jm(kr r) r dr
+#
+#  Using J_m(ar)J_m(br) = (1/2π) ∫₀²π J₀(c(φ)r) e^{-imφ} dφ
+#  with c(φ) = √(a²+b²−2ab cosφ):
+#
+#    a_m(kr) = (-i)^m kr · (1/2π) ∫₀²π T₀(c(kr,kx,φ)) e^{-imφ} dφ
+#
+#  The m-sum becomes an FFT over φ at each kr.
+#  Total cost: 1 FFTLog + Nkr interpolations + Nkr FFTs.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    cyfft_farfield_shift(t_r, r, k, alpha, f; M_max=nothing, L_max=nothing, Npsi=128, Nphi=nothing)
+    -> (psf, rho_grid, psi_grid)
+
+**Fast path for LPA / Jacobi-Anger fields.**
+
+Instead of M_max separate FFTLog calls, computes ALL scalar modal
+coefficients from a single order-0 Hankel transform T₀ via the
+Neumann shift theorem.  Then applies TE/TM splitting, propagation,
+symmetry, Graf shift, and synthesis as usual.
+
+# Arguments
+- `t_r`   : complex [Nr], radial transmission t(r) (e.g. ideal lens phase)
+- `r`     : log-spaced radial grid
+- `k`     : wavenumber, `alpha`: oblique angle, `f`: focal length
+- `M_max` : mode truncation (default: ceil(k sinα R) + 10)
+- `Nphi`  : angular resolution for Neumann integral (default: next power-of-2 ≥ 2M_max+1)
+"""
+function cyfft_farfield_shift(t_r::Vector{ComplexF64},
+                               r::Vector{Float64},
+                               k::Float64, alpha::Float64, f::Float64;
+                               M_max::Union{Int,Nothing} = nothing,
+                               L_max::Union{Int,Nothing} = nothing,
+                               Npsi::Int = 128,
+                               Nphi::Union{Int,Nothing} = nothing)
+    Nr  = length(r)
+    R   = maximum(r)
+    dln = log(r[2] / r[1])
+    x0  = f * tan(alpha)
+    kx  = k * sin(alpha)
+
+    if isnothing(M_max)
+        M_max = ceil(Int, kx * R) + 10
+    end
+    if isnothing(Nphi)
+        Nphi = max(nextpow(2, 2M_max + 1), 64)
+    end
+
+    lambda   = 2π / k
+    rho_max_ = 5.0 * lambda
+    if isnothing(L_max)
+        NA    = max(sin(alpha), 0.1)
+        L_max = ceil(Int, k * NA * rho_max_) + 5
+        L_max = max(L_max, 5)
+    end
+
+    kr_grid   = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
+    log_kr    = log.(kr_grid)
+
+    kr_max = 1.0 / r[1]
+    if kr_max < k
+        @warn "kr_max = $(round(kr_max, sigdigits=4)) < k = $(round(k, sigdigits=4)). " *
+              "Decrease r_min to at most 1/k."
+    end
+
+    # ── Step A: Single order-0 Hankel transform ─────────────────
+    T0 = fftlog_hankel(r .* t_r, dln, 0.0)  # T₀(kr) = H₀[r·t](kr)
+
+    # ── Step B: Neumann shift → all scalar a_m(kr) via FFT ──────
+    # For each kr, evaluate T₀ at c(φ) = √(kr²+kx²−2·kr·kx·cosφ)
+    # then FFT over φ to extract modes m = -M_max..M_max.
+    phi_grid = range(0.0, 2π, length=Nphi+1)[1:end-1]
+
+    # Propagation phase (applied per-kr)
+    kz   = @. sqrt(complex(k^2 - kr_grid^2))
+    prop = @. ifelse(kr_grid < k, exp(im * real(kz) * f), zero(ComplexF64))
+
+    N_full  = 2M_max + 1
+    A_tilde = zeros(ComplexF64, Nr, N_full)
+
+    Threads.@threads for ikr in 1:Nr
+        kr_val = kr_grid[ikr]
+
+        # Evaluate T₀ at shifted arguments c(φ)
+        buf = Vector{ComplexF64}(undef, Nphi)
+        for (ip, phi) in enumerate(phi_grid)
+            c = sqrt(max(kr_val^2 + kx^2 - 2*kr_val*kx*cos(phi), 0.0))
+            # Interpolate T₀ on log-spaced kr grid
+            if c < kr_grid[1] || c > kr_grid[end]
+                buf[ip] = zero(ComplexF64)
+            else
+                lc = log(c)
+                # Linear interpolation in log-kr
+                idx_f = (lc - log_kr[1]) / dln + 1.0
+                j0 = clamp(floor(Int, idx_f), 1, Nr-1)
+                w  = idx_f - j0
+                buf[ip] = (1-w) * T0[j0] + w * T0[j0+1]
+            end
+        end
+
+        # FFT over φ → scalar modes a_m
+        # IFFT convention: mode m at FFTW index mod(m, Nphi)+1
+        # But we want: a_m ∝ ∫ T₀(c(φ)) e^{-imφ} dφ, which is fft (not ifft)
+        am_fft = fft(buf)  # am_fft[mod(m,Nphi)+1] ∝ Σ_φ buf(φ) e^{-2πi m φ_idx/Nphi}
+
+        # Build scalar A_tilde_m = (-i)^m · kr · (2π/Nphi) · am_fft[m] · prop
+        # (The 2π/Nphi factor comes from the trapezoidal quadrature of the φ integral,
+        #  and the 1/(2π) from the Neumann formula, giving net 1/Nphi)
+        # Then split into TE+TM for x-polarized field.
+        # For scalar: Ã_m = a_m · prop  (TE+TM combined).
+        for m in -M_max:M_max
+            jj   = mod(m, Nphi) + 1
+            phase = (Complex(-1.0im))^m   # (-i)^m
+            a_m  = phase * kr_val * am_fft[jj] / Nphi
+            idx  = m + M_max + 1
+            A_tilde[ikr, idx] = a_m * prop[ikr]
+        end
+    end
+
+    m_full = collect(-M_max:M_max)
+
+    # ── Steps 4–6: Graf shift → inverse Hankel → synthesis ──────
+    if x0 > 0 && R > x0
+        @warn "Output rho_grid may extend beyond x0 = f·tan(α). " *
+              "Graf's theorem converges only for ρ < x0."
+    end
+
+    B = graf_shift_all_kr(A_tilde, m_full, kr_grid, x0, L_max)
+    b = local_hankel_inverse(B, kr_grid, dln, L_max)
+    rho_grid = exp.(log(1.0 / kr_grid[end]) .+ dln .* (0:length(kr_grid)-1))
+    psf, psi_grid = synthesize_local_psf(b, L_max, Npsi)
+
+    return psf, rho_grid, psi_grid
 end
 
 end  # module CyFFP
