@@ -315,7 +315,7 @@ Ntheta_13 = 256
 r_13      = exp.(range(log(0.05 * lambda_13), log(R_13), length=Nr_13))
 theta_13  = range(0.0, 2π, length=Ntheta_13+1)[1:end-1]
 
-M_max_13 = ceil(Int, kx_13 * R_13) + 5
+M_max_13 = ceil(Int, kx_13 * R_13) + 20   # generous buffer for tight tolerances
 println("  R=$(R_13/lambda_13)λ, f=$(round(f_13/lambda_13, digits=1))λ, α=10°, NA≈0.25")
 println("  M_max = $M_max_13,  Nθ = $Ntheta_13,  Nr = $Nr_13")
 @assert Ntheta_13 >= 2M_max_13 + 1 "Ntheta=$Ntheta_13 too small for M_max=$M_max_13"
@@ -398,7 +398,7 @@ peak_mode_energy = maximum(sum(abs2.(Em_r_13), dims=1) .+ sum(abs2.(Em_t_13), di
 tail_energy = sum(abs2.(Em_r_13[:, end])) + sum(abs2.(Em_t_13[:, end]))
 tail_ratio = tail_energy / peak_mode_energy
 println("    Energy at m=$(M_max_13) / peak mode energy: $(round(tail_ratio, sigdigits=3))")
-@assert tail_ratio < 1e-4 "Mode truncation insufficient — tail energy too large"
+@assert tail_ratio < 1e-10 "Mode truncation insufficient — tail energy too large"
 println("    PASSED ✓")
 
 # --- 13e: u(r,θ) has symmetry u(r,-θ) = u(r,θ) — check directly ---
@@ -445,10 +445,8 @@ end
 field_scale = maximum(abs.(Er_13)) + 1e-30
 rel_recon = max_recon_err / field_scale
 println("    Max relative reconstruction error: $(round(rel_recon, sigdigits=3))")
-# Tolerance allows for truncation at M_max (high modes are lost).
-# For the scaled-down R=10λ lens with M_max=16, the tail energy (Test 13d)
-# is ~1e-6, giving ~0.1-1% reconstruction error.
-@assert rel_recon < 1e-2 "Reconstruction from modes too inaccurate"
+# With buffer +20, truncation error should be negligible.
+@assert rel_recon < 1e-6 "Reconstruction from modes too inaccurate"
 println("    PASSED ✓")
 
 println("\n  Test 13 PASSED ✓")
