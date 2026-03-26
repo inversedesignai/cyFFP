@@ -431,6 +431,35 @@ end
 # per-mode FFTLog calls with a single one.
 # ═══════════════════════════════════════════════════════════════
 
+# Helper: fill the T_phi interpolation matrix.  Separated from the main
+# function to avoid @threads closure type instability (Julia performance
+# pattern: closures that capture many variables are slow in @threads).
+function _neumann_fill!(T_phi::Matrix{ComplexF64},
+                         kr_grid::Vector{Float64},
+                         T0::Vector{ComplexF64},
+                         kx_sq::Float64,
+                         two_kx_cos::Vector{Float64},
+                         log_kr_min::Float64,
+                         log_kr_max::Float64,
+                         inv_dln::Float64,
+                         Nr::Int, N_phi::Int)
+    Threads.@threads for ikr in 1:Nr
+        kv    = kr_grid[ikr]
+        kv_sq = kv^2
+        @inbounds for s in 1:N_phi
+            c_sq = kv_sq + kx_sq - kv * two_kx_cos[s]
+            c_sq <= 0.0 && continue
+            c = sqrt(c_sq)
+            lc = log(c)
+            (lc < log_kr_min || lc > log_kr_max) && continue
+            idx_f = (lc - log_kr_min) * inv_dln + 1.0
+            j0    = clamp(unsafe_trunc(Int, idx_f), 1, Nr - 1)
+            w     = idx_f - j0
+            T_phi[ikr, s] = (1 - w) * T0[j0] + w * T0[j0 + 1]
+        end
+    end
+end
+
 """
     neumann_shift_coeffs(t_r, r, k, alpha, M_max) -> (a_m, kr_grid, m_pos)
 
@@ -473,7 +502,7 @@ function neumann_shift_coeffs(t_r::AbstractVector,
     # ─── Step B: per-kr interpolation + FFT over φ ────────────
     N_phi = max(2M_max + 1, 256)
     N_phi = 1 << ceil(Int, log2(N_phi))   # round up to power of 2
-    phi   = range(0.0, 2π, length=N_phi+1)[1:end-1]
+    phi_vals = range(0.0, 2π, length=N_phi+1)[1:end-1]
 
     a_m = zeros(ComplexF64, Nr, M_max + 1)
 
@@ -482,45 +511,40 @@ function neumann_shift_coeffs(t_r::AbstractVector,
 
     # Log-interpolation setup for T₀
     log_kr_min = log(kr_grid[1])
+    log_kr_max = log(kr_grid[end])
+    inv_dln    = 1.0 / dln
 
-    # Pre-allocate per-thread FFT buffers and plans
-    nt = Threads.maxthreadid()
-    phi_bufs   = [Vector{ComplexF64}(undef, N_phi) for _ in 1:nt]
-    phi_plans  = [plan_fft!(phi_bufs[t]; flags=FFTW.MEASURE) for t in 1:nt]
+    # Precompute 2kx·cos(φ) values
+    two_kx_cos = [2 * kx * cos(phi_vals[s]) for s in 1:N_phi]
+    kx_sq      = kx^2
 
-    # Precompute cos(φ) values
-    cos_phi = [cos(phi[s]) for s in 1:N_phi]
+    # ─── Build 2D matrix T_phi[Nr, Nφ] then batch-FFT ────────
+    # This replaces Nr individual tiny FFTs with one FFTW batch FFT
+    # (much better cache utilization and SIMD vectorization).
+    T_phi = zeros(ComplexF64, Nr, N_phi)
 
-    Threads.@threads for ikr in 1:Nr
-        tid = Threads.threadid()
-        buf = phi_bufs[tid]
-        pf  = phi_plans[tid]
+    # Create batch FFT plan BEFORE filling data.
+    # Use ESTIMATE here (not MEASURE): this plan is used only once per call,
+    # so the ~1s MEASURE plan creation time isn't amortized.
+    pfft2 = plan_fft!(T_phi, 2; flags=FFTW.ESTIMATE)
 
-        kv = kr_grid[ikr]
+    # Fill T_phi via a separate function to avoid closure type instability
+    # in @threads (a common Julia performance pattern).
+    _neumann_fill!(T_phi, kr_grid, T0, kx_sq, two_kx_cos,
+                    log_kr_min, log_kr_max, inv_dln, Nr, N_phi)
 
-        # Interpolate T₀ at c(φ) = √(kr² + kₓ² - 2 kr kₓ cosφ)
-        @inbounds for s in 1:N_phi
-            c_sq = kv^2 + kx^2 - 2*kv*kx*cos_phi[s]
-            c = sqrt(max(c_sq, 0.0))
+    # Batch FFT along φ dimension (dimension 2).
+    # FFTW optimizes this much better than Nr individual FFTs.
+    pfft2 * T_phi
 
-            if c < kr_grid[1] || c > kr_grid[end]
-                buf[s] = zero(ComplexF64)
-            else
-                lc    = log(c)
-                idx_f = (lc - log_kr_min) / dln + 1.0
-                j0    = clamp(floor(Int, idx_f), 1, Nr - 1)
-                w     = idx_f - j0
-                buf[s] = (1 - w) * T0[j0] + w * T0[j0 + 1]
-            end
-        end
-
-        # FFT over φ: F[m] = Σ_s buf[s] e^{-2πi ms/Nφ}
-        pf * buf
-
-        # Extract modes: a_m(kr) = i^m / Nφ × F[m]
-        @inbounds for idx in 1:M_max+1
-            m = m_pos[idx]
-            a_m[ikr, idx] = im_factors[idx] * buf[m + 1] / N_phi
+    # Extract modes: a_m(kr) = i^m / Nφ × FFT_φ[m]
+    inv_Nphi = 1.0 / N_phi
+    @inbounds for idx in 1:M_max+1
+        m    = m_pos[idx]
+        imf  = im_factors[idx] * inv_Nphi
+        col  = m + 1
+        for ikr in 1:Nr
+            a_m[ikr, idx] = imf * T_phi[ikr, col]
         end
     end
 
