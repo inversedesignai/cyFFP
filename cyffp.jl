@@ -125,10 +125,20 @@ function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     # where q = 2πn/(N·Δln) are the DFT frequency values (real).
     # The Gamma arguments are made complex to handle the loggamma
     # branch cut for negative real arguments at large |ν|.
+    #
+    # The kernel grows exponentially with |q|.  For large grids
+    # (small Δln), q_max = π/Δln can reach 100+, making the kernel
+    # ~10^{155} — beyond Float64 range.  We cap the log-magnitude
+    # to avoid overflow: high-q FFT components of any smooth input
+    # are at machine epsilon anyway, so this loses nothing.
     U_c = map(q) do qj
         a = complex((nu + 1.0 + qj) / 2)
         b = complex((nu + 1.0 - qj) / 2)
-        exp(loggamma(a) - loggamma(b) + qj * log(2.0))
+        log_kernel = loggamma(a) - loggamma(b) + qj * log(2.0)
+        if real(log_kernel) > 200.0    # exp(200) ≈ 10^87, safe for Float64
+            return zero(ComplexF64)
+        end
+        exp(log_kernel)
     end
 
     F = fft(complex.(f_r))
