@@ -73,10 +73,11 @@ println("  PASSED ✓")
 # ─── Test 3: x-polarized field ────────────────────────────────
 println("\n--- Test 3: x-polarized field u(r)(cosθ r̂ - sinθ θ̂) ---")
 # x̂ = cosθ r̂ - sinθ θ̂
-# cosθ = (e^{iθ} + e^{-iθ})/2  →  modes m = +1 and m = -1
-# sinθ = (e^{iθ} - e^{-iθ})/(2i)
-# E_{+1,r} = u/2, E_{-1,r} = u/2
-# E_{+1,θ} = -u/2, E_{-1,θ} = u/2
+# cosθ = (e^{iθ} + e^{-iθ})/2        → m=+1 coeff: 1/2,  m=-1 coeff: 1/2
+# -sinθ = -(e^{iθ} - e^{-iθ})/(2i)   → m=+1 coeff: -1/(2i) = i/2
+#                                        m=-1 coeff:  1/(2i) = -i/2
+# So: E_{+1,r} = u/2,    E_{-1,r} = u/2
+#     E_{+1,θ} = iu/2,   E_{-1,θ} = -iu/2
 u_r = exp.(-collect(r))
 Er_3  = [u_r[jr] * cos(th) for jr in 1:Nr, th in theta]
 Et_3  = [-u_r[jr] * sin(th) for jr in 1:Nr, th in theta]
@@ -89,9 +90,9 @@ check_sparsity(Em_r_3, m_pos_3, Set([1]))
 check_sparsity(Em_t_3, m_pos_3, Set([1]))
 
 err_3r = maximum(abs.(Em_r_3[:, 2] .- u_r ./ 2))
-err_3t = maximum(abs.(Em_t_3[:, 2] .- (-u_r ./ 2)))
+err_3t = maximum(abs.(Em_t_3[:, 2] .- (im .* u_r ./ 2)))
 println("  E_{1,r} error: $(round(err_3r, sigdigits=3))  (expected u/2)")
-println("  E_{1,θ} error: $(round(err_3t, sigdigits=3))  (expected -u/2)")
+println("  E_{1,θ} error: $(round(err_3t, sigdigits=3))  (expected iu/2)")
 @assert err_3r < 1e-12 && err_3t < 1e-12 "x-pol mode amplitudes wrong"
 println("  PASSED ✓")
 
