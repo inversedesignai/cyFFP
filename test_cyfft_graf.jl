@@ -327,3 +327,109 @@ println("  (Should converge; increments should decrease rapidly)")
 println("\n" * "="^60)
 println("All tests passed.")
 println("="^60)
+
+# ═══════════════════════════════════════════════════════════════
+# PSF heatmaps for visual inspection
+# Saves PNG files to the working directory.
+# ═══════════════════════════════════════════════════════════════
+println("\n--- Generating PSF heatmaps ---")
+try
+    using Plots
+
+    # Helper: polar (ρ, ψ) PSF → Cartesian (x, y) heatmap
+    function polar_to_cartesian_heatmap(I_polar, rho_grid, psi_grid;
+                                         rho_max=nothing, Nxy=201)
+        if isnothing(rho_max)
+            rho_max = rho_grid[end]
+        end
+        xs = range(-rho_max, rho_max, length=Nxy)
+        ys = range(-rho_max, rho_max, length=Nxy)
+        I_cart = zeros(Nxy, Nxy)
+
+        dpsi = psi_grid[2] - psi_grid[1]
+        log_rho = log.(rho_grid)
+
+        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
+            rho = sqrt(x^2 + y^2)
+            psi = mod(atan(y, x), 2π)
+
+            # Skip if outside ρ range
+            if rho < rho_grid[1] || rho > rho_grid[end]
+                continue
+            end
+
+            # Find nearest ρ index (log-spaced → search in log)
+            lr = log(rho)
+            ir = searchsortedlast(log_rho, lr)
+            ir = clamp(ir, 1, length(rho_grid))
+
+            # Find nearest ψ index
+            ip = round(Int, psi / dpsi) + 1
+            ip = clamp(ip, 1, length(psi_grid))
+
+            I_cart[iy, ix] = I_polar[ir, ip]
+        end
+        return xs, ys, I_cart
+    end
+
+    plot_rho_max = 5.0 * lambda   # show ±5λ around focus
+
+    # --- Normal incidence PSF (Test 4) ---
+    xs_n, ys_n, Ic_n = polar_to_cartesian_heatmap(
+        I_n, rho_n, collect(psi_n); rho_max=plot_rho_max)
+    p1 = heatmap(xs_n ./ lambda, ys_n ./ lambda, Ic_n ./ maximum(Ic_n),
+        xlabel="x / λ", ylabel="y / λ",
+        title="Normal incidence PSF",
+        aspect_ratio=:equal, color=:hot, clims=(0, 1))
+    savefig(p1, "psf_normal.png")
+    println("  Saved psf_normal.png")
+
+    # --- Ideal oblique lens PSF (Test 5) ---
+    xs_ob, ys_ob, Ic_ob = polar_to_cartesian_heatmap(
+        I_ob, rho_ob, collect(psi_ob); rho_max=plot_rho_max)
+    p2 = heatmap(xs_ob ./ lambda, ys_ob ./ lambda, Ic_ob ./ maximum(Ic_ob),
+        xlabel="x / λ", ylabel="y / λ",
+        title="Ideal oblique lens PSF (α=$(round(rad2deg(alpha), digits=1))°)",
+        aspect_ratio=:equal, color=:hot, clims=(0, 1))
+    savefig(p2, "psf_oblique_ideal.png")
+    println("  Saved psf_oblique_ideal.png")
+
+    # --- Jacobi-Anger PSF (Test 9, normal lens + oblique wave) ---
+    xs_a, ys_a, Ic_a = polar_to_cartesian_heatmap(
+        I_a, rho_a, collect(psi_a); rho_max=plot_rho_max)
+    p3 = heatmap(xs_a ./ lambda, ys_a ./ lambda, Ic_a ./ maximum(Ic_a),
+        xlabel="x / λ", ylabel="y / λ",
+        title="Normal lens + oblique wave PSF (α=$(round(rad2deg(alpha_a), digits=1))°)",
+        aspect_ratio=:equal, color=:hot, clims=(0, 1))
+    savefig(p3, "psf_oblique_jacobi_anger.png")
+    println("  Saved psf_oblique_jacobi_anger.png")
+
+    # --- Radial profile comparison ---
+    I_rad_n  = mean(I_n,  dims=2)[:, 1]
+    I_rad_ob = mean(I_ob, dims=2)[:, 1]
+    I_rad_a  = mean(I_a,  dims=2)[:, 1]
+
+    p4 = plot(rho_n  ./ lambda, I_rad_n  ./ maximum(I_rad_n),
+        label="Normal incidence", xlabel="ρ / λ", ylabel="I (normalised)",
+        xlims=(0, 5), yscale=:log10, ylims=(1e-4, 1.5),
+        title="ψ-averaged radial profiles", lw=2)
+    plot!(p4, rho_ob ./ lambda, I_rad_ob ./ maximum(I_rad_ob),
+        label="Ideal oblique (α=11°)", lw=2)
+    plot!(p4, rho_a  ./ lambda, I_rad_a  ./ maximum(I_rad_a),
+        label="Normal lens + oblique wave", lw=2, ls=:dash)
+    # Theoretical Airy envelope
+    rho_th = range(0.1*lambda, 5*lambda, length=500)
+    v_n  = k .* NA_0  .* rho_th
+    v_ob = k .* NA_ob .* rho_th
+    airy_env_n  = @. (2 * besselj(1, v_n)  / v_n )^2
+    airy_env_ob = @. (2 * besselj(1, v_ob) / v_ob)^2
+    plot!(p4, rho_th ./ lambda, airy_env_n,
+        label="Airy (NA=$(round(NA_0, digits=3)))", lw=1, ls=:dot, color=:black)
+    plot!(p4, rho_th ./ lambda, airy_env_ob,
+        label="Airy (NA_eff=$(round(NA_ob, digits=3)))", lw=1, ls=:dot, color=:red)
+    savefig(p4, "psf_radial_profiles.png")
+    println("  Saved psf_radial_profiles.png")
+
+catch e
+    println("  Skipping plots (install Plots.jl to enable): ", e)
+end
