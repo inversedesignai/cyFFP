@@ -9,8 +9,9 @@
 module CyFFP
 
 using FFTW
+using SpecialFunctions: loggamma
 
-export angular_decompose
+export angular_decompose, fftlog_hankel
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -64,6 +65,74 @@ function angular_decompose(Er::Matrix{ComplexF64},
     idx   = m_pos .+ 1
 
     return Em_r_full[:, idx], Em_theta_full[:, idx], m_pos
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 2 (part 1) — FFTLog Hankel Transform
+#
+#   H_ν[f](k) = ∫₀^∞ f(r) J_ν(k r) dr
+#
+# Computed via log-variable change r = r₀ eᵗ, k = k₀ eˢ (r₀k₀=1),
+# which converts the Hankel integral into a convolution:
+#   A(s) = ∫ g(t) K_ν(s+t) dt,   g(t) = r₀ eᵗ f(r₀ eᵗ),  K_ν(τ) = J_ν(eᵗ)
+#
+# In Fourier space:  Â(q) = ĝ(q) · û(q)
+# where the filter kernel is:
+#   û(q) = Γ((ν+1+q)/2) / Γ((ν+1-q)/2) · 2^q
+# with q = 2πn/(N·Δln) being the DFT frequency values.
+#
+# Input f_r must be sampled on a log-spaced grid:
+#   r[j] = r₀ · exp(j · Δln),   j = 0, ..., N-1
+#
+# Output lives on the reciprocal log-grid:
+#   kr[j] = (1/r[end]) · exp(j · Δln)
+#
+# Convention: plain dr measure (no r weight).  Call sites needing
+# the r dr measure pre-multiply by r or kr.
+#
+# Stable for any real ν, including |ν| ~ 600+.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    fftlog_hankel(f_r, dln, nu) -> A_kr
+
+Compute the order-ν Hankel transform
+
+    H_ν[f](k) = ∫₀^∞ f(r) J_ν(k r) dr
+
+of `f_r` sampled on a log-spaced grid `r[j] = r₀ exp(j Δln)`.
+
+Returns the transform on the reciprocal log-grid
+`kr[j] = (1/r[end]) exp(j Δln)`.
+
+Uses the plain `dr` measure.  For the standard Hankel pair with `r dr`
+measure, pre-multiply the input by `r`.
+
+# Arguments
+- `f_r`  : input samples (length N, may be complex)
+- `dln`  : log-spacing Δln = log(r[2]/r[1])
+- `nu`   : Bessel order (any real number)
+"""
+function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
+    N = length(f_r)
+
+    # FFTW-ordered frequency indices: 0,1,...,⌊(N-1)/2⌋, -⌊N/2⌋,...,-1
+    n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
+    q     = @. (2π / (N * dln)) * n_idx
+
+    # Filter kernel: û(q) = Γ((ν+1+q)/2) / Γ((ν+1-q)/2) · 2^q
+    # where q = 2πn/(N·Δln) are the DFT frequency values (real).
+    # The Gamma arguments are made complex to handle the loggamma
+    # branch cut for negative real arguments at large |ν|.
+    U_c = map(q) do qj
+        a = complex((nu + 1.0 + qj) / 2)
+        b = complex((nu + 1.0 - qj) / 2)
+        exp(loggamma(a) - loggamma(b) + qj * log(2.0))
+    end
+
+    F = fft(complex.(f_r))
+    return ifft(F .* U_c)
 end
 
 end  # module CyFFP
