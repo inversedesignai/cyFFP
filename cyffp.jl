@@ -108,6 +108,93 @@ end
 # Stable for any real ν, including |ν| ~ 600+.
 # ═══════════════════════════════════════════════════════════════
 
+# ─── Pre-allocated FFTLog workspace (for zero-allocation hot loops) ───
+#
+# Holds per-thread buffers and in-place FFTW plans.  Created once per
+# (N, dln) pair, reused across all Bessel orders within that grid.
+
+struct _FFTLogWorkspace
+    N::Int
+    buf::Vector{ComplexF64}      # work buffer (FFT/IFFT in-place)
+    U_c::Vector{ComplexF64}      # kernel buffer (rewritten per order)
+    q::Vector{Float64}           # DFT frequency indices (fixed for given N, dln)
+    pfft!::Any                   # in-place FFT plan
+    pifft!::Any                  # in-place IFFT plan
+end
+
+function _make_workspace(N::Int, dln::Float64)
+    buf  = zeros(ComplexF64, N)
+    U_c  = zeros(ComplexF64, N)
+    n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
+    q    = @. (2π / (N * dln)) * n_idx
+    pfft!  = plan_fft!(buf)
+    pifft! = plan_ifft!(buf)
+    return _FFTLogWorkspace(N, buf, U_c, q, pfft!, pifft!)
+end
+
+"""
+    _fftlog_hankel!(out, ws, f_r, nu)
+
+Zero-allocation FFTLog Hankel transform.  Writes result into `out`.
+Uses pre-allocated workspace `ws` (from `_make_workspace`).
+
+Same mathematical operation as `fftlog_hankel`, but avoids all
+heap allocations in the hot path.
+"""
+function _fftlog_hankel!(out::AbstractVector{ComplexF64},
+                          ws::_FFTLogWorkspace,
+                          f_r::AbstractVector,
+                          nu::Float64)
+    N = ws.N
+
+    # Handle negative integer orders without recursion
+    nu_eff = nu
+    neg_sign = 1
+    if nu < 0 && nu == round(nu)
+        n = round(Int, -nu)
+        neg_sign = iseven(n) ? 1 : -1
+        nu_eff = Float64(n)
+    end
+
+    # Compute kernel in-place (only part that depends on ν)
+    @inbounds for i in 1:N
+        qj = ws.q[i]
+        a = complex((nu_eff + 1.0) / 2, +qj / 2)
+        b = complex((nu_eff + 1.0) / 2, -qj / 2)
+        ws.U_c[i] = exp(loggamma(a) - loggamma(b) + im * qj * log(2.0))
+    end
+
+    # Copy input into work buffer
+    @inbounds for i in 1:N
+        ws.buf[i] = ComplexF64(f_r[i])
+    end
+
+    # In-place FFT
+    ws.pfft! * ws.buf
+
+    # Multiply by kernel in-place
+    @inbounds for i in 1:N
+        ws.buf[i] *= ws.U_c[i]
+    end
+
+    # In-place IFFT
+    ws.pifft! * ws.buf
+
+    # Reverse into output, with optional sign flip
+    if neg_sign == 1
+        @inbounds for i in 1:N
+            out[i] = ws.buf[N - i + 1]
+        end
+    else
+        @inbounds for i in 1:N
+            out[i] = -ws.buf[N - i + 1]
+        end
+    end
+
+    return out
+end
+
+
 """
     fftlog_hankel(f_r, dln, nu) -> A_kr
 
@@ -129,8 +216,10 @@ measure, pre-multiply the input by `r`.
 - `nu`   : Bessel order (any real number)
 """
 function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
+    # Public API: allocates workspace each call (for backward compatibility).
+    # Hot loops should use _fftlog_hankel! with pre-allocated workspaces.
+
     # Handle negative integer orders via J_{-n}(x) = (-1)^n J_n(x).
-    # This avoids Gamma-function poles at non-positive integer arguments.
     if nu < 0 && nu == round(nu)
         n = round(Int, -nu)
         sign = iseven(n) ? 1 : -1
@@ -138,39 +227,18 @@ function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     end
 
     N = length(f_r)
-
-    # FFTW-ordered frequency indices: 0,1,...,⌊(N-1)/2⌋, -⌊N/2⌋,...,-1
     n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
     q     = @. (2π / (N * dln)) * n_idx
 
-    # Filter kernel (following mcfit / Hamilton 2000):
-    #
-    #   û(q) = 2^{iq} Γ((ν+1+iq)/2) / Γ((ν+1-iq)/2)
-    #
-    # where q = 2πn/(NΔln) are real DFT frequency values.
-    #
-    # This is the Mellin transform M[t J_ν(t)](iq) which arises when
-    # the Hankel kernel K(t) = t J_ν(t) is used with the d(ln r) measure.
-    # Since the caller pre-multiplies by r for the dr measure, the
-    # effective transform is ∫ f(r) J_ν(kr) dr.
-    #
-    # Key property: |û(q)| = 1 for all q (conjugate Gamma pair).
     U_c = map(q) do qj
-        a = complex((nu + 1.0) / 2, +qj / 2)   # (ν+1+iq)/2
-        b = complex((nu + 1.0) / 2, -qj / 2)   # (ν+1-iq)/2
+        a = complex((nu + 1.0) / 2, +qj / 2)
+        b = complex((nu + 1.0) / 2, -qj / 2)
         exp(loggamma(a) - loggamma(b) + im * qj * log(2.0))
     end
 
     F = fft(complex.(f_r))
     A = ifft(F .* U_c)
 
-    # The output must be reversed: the "natural" FFTLog output grid starts
-    # at 1/r_min (huge), and reversing maps it to the useful grid
-    # kr[j] = (1/r_max) exp(j Δln), matching the dev convention.
-    #
-    # IMPORTANT: the mcfit-convention kernel K(t) = t J_ν(t) introduces an
-    # extra factor of kr in the output.  The raw output is kr × H_ν[f](kr).
-    # The caller must divide by kr to obtain the pure Hankel transform.
     return reverse(A)
 end
 
@@ -217,16 +285,32 @@ function compute_scalar_coeffs(u_m::Matrix{ComplexF64},
 
     a_m = zeros(ComplexF64, Nr, N_modes)
 
-    # Warm FFTW plan cache (thread-safety)
-    fftlog_hankel(zeros(ComplexF64, Nr), dln, 0.0)
+    # Pre-allocate one workspace per thread (in-place FFTW plans + buffers).
+    # Use maxthreadid() to cover all possible thread IDs (Julia 1.12+
+    # separates interactive thread 1 from compute threads 2+).
+    nt = Threads.maxthreadid()
+    workspaces = [_make_workspace(Nr, dln) for _ in 1:nt]
+    g_bufs     = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
 
     Threads.@threads for idx in 1:N_modes
-        m   = m_pos[idx]
-        g   = r .* u_m[:, idx]    # r × u_m — Hankel integrand with r dr measure
+        tid = Threads.threadid()
+        ws  = workspaces[tid]
+        g   = g_bufs[tid]
 
-        # FFTLog returns kr × H_m[g](kr).  Divide by kr to get a_m.
-        raw = fftlog_hankel(g, dln, Float64(m))
-        a_m[:, idx] .= raw ./ kr_grid
+        m = m_pos[idx]
+
+        # g = r × u_m (Hankel integrand with r dr measure) — zero-alloc
+        @inbounds for j in 1:Nr
+            g[j] = r[j] * u_m[j, idx]
+        end
+
+        # FFTLog returns kr × H_m[g](kr) — zero-alloc via workspace
+        _fftlog_hankel!(view(a_m, :, idx), ws, g, Float64(m))
+
+        # Divide by kr to get a_m — zero-alloc
+        @inbounds for j in 1:Nr
+            a_m[j, idx] /= kr_grid[j]
+        end
     end
 
     return a_m, kr_grid
@@ -483,21 +567,29 @@ function inverse_hankel(B::Matrix{ComplexF64},
 
     b = zeros(ComplexF64, Nkr, Nl)
 
-    # Warm FFTW plan cache
-    fftlog_hankel(zeros(ComplexF64, Nkr), dln, 0.0)
+    # Pre-allocate one workspace per thread.
+    nt = Threads.maxthreadid()
+    workspaces = [_make_workspace(Nkr, dln) for _ in 1:nt]
+    f_bufs     = [Vector{ComplexF64}(undef, Nkr) for _ in 1:nt]
 
     Threads.@threads for li in 1:Nl
-        l = li - L_max - 1   # l = -L_max, ..., L_max
+        tid = Threads.threadid()
+        ws  = workspaces[tid]
+        f   = f_bufs[tid]
+        l   = li - L_max - 1
 
-        # b_l(ρ) = ∫ B_l(kr) J_l(kr ρ) kr dkr
-        # Pre-multiply by kr for the kr dkr measure
-        f = kr_grid .* B[:, li]
+        # f = kr × B_l (pre-multiply for kr dkr measure) — zero-alloc
+        @inbounds for j in 1:Nkr
+            f[j] = kr_grid[j] * B[j, li]
+        end
 
-        # FFTLog returns ρ × b_l(ρ)
-        raw = fftlog_hankel(f, dln, Float64(l))
+        # FFTLog returns ρ × b_l(ρ) — zero-alloc via workspace
+        _fftlog_hankel!(view(b, :, li), ws, f, Float64(l))
 
-        # Divide by ρ to get b_l(ρ)
-        b[:, li] .= raw ./ rho_grid
+        # Divide by ρ to get b_l(ρ) — zero-alloc
+        @inbounds for j in 1:Nkr
+            b[j, li] /= rho_grid[j]
+        end
     end
 
     return b, rho_grid
