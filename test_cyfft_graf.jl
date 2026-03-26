@@ -147,10 +147,11 @@ psf_n, rho_n, psi_n = cyfft_farfield(
 I_n     = abs2.(psf_n)
 peak_ix = argmax(I_n)
 rho_pk  = rho_n[peak_ix[1]]
+NA_0    = R / sqrt(R^2 + f^2)
+airy_n  = 0.61 * lambda / NA_0    # Airy radius at normal incidence
 println("  PSF peak at ρ = $(round(rho_pk/lambda, digits=4)) λ")
-println("  (expected ρ ≈ 0)")
-airy    = 0.61 * lambda / 0.5
-@assert rho_pk < 3airy "Normal-incidence PSF peak too far from origin"
+println("  (expected ρ ≈ 0;  Airy radius = $(round(airy_n/lambda, digits=3)) λ)")
+@assert rho_pk < 3airy_n "Normal-incidence PSF peak too far from origin"
 println("  PASSED ✓")
 
 # ─── Test 5: Oblique incidence — PSF in local frame ─────────────
@@ -171,8 +172,15 @@ psf_ob, rho_ob, psi_ob = cyfft_farfield(
 I_ob    = abs2.(psf_ob)
 peak_ob = argmax(I_ob)
 rho_pk2 = rho_ob[peak_ob[1]]
+# Oblique Airy radius: effective NA is reduced because the focal spot
+# is at distance f/cos(α) from the aperture, not f.
+NA_ob   = R * cos(alpha) / sqrt((R * cos(alpha))^2 + f^2)
+airy_ob = 0.61 * lambda / NA_ob
 println("  PSF peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ in local frame")
-@assert rho_pk2 < 3airy "Oblique PSF peak too far from local origin"
+println("  Oblique Airy radius = $(round(airy_ob/lambda, digits=3)) λ  " *
+        "(normal = $(round(airy_n/lambda, digits=3)) λ, " *
+        "$(round(100*(airy_ob/airy_n - 1), digits=1))% larger)")
+@assert rho_pk2 < 3airy_ob "Oblique PSF peak too far from local origin"
 println("  PASSED ✓")
 
 # ─── Test 6: cyfft_farfield_modal matches cyfft_farfield ─────────
@@ -250,14 +258,23 @@ if !isempty(sig_rows)
 end
 println("  8b: Circular symmetry ✓")
 
-# --- 8c: Airy disk profile —
-# Theoretical: I(ρ) ∝ [2 J₁(v) / v]²  where v = k·NA·ρ
-# with NA = R/√(R²+f²) for a circular aperture.
-# First zero at v₁ = 3.8317, i.e. ρ₁ = 3.8317/(k·NA)
-NA_lens   = R / sqrt(R^2 + f^2)
-rho_airy1 = 3.8317 / (k * NA_lens)
-println("  Lens NA = $(round(NA_lens, digits=3)),  " *
-        "Airy first zero = $(round(rho_airy1/lambda, digits=3)) λ")
+# --- 8c: Airy disk profile ---
+# Theoretical: I(ρ) ∝ [2 J₁(v) / v]²  where v = k·NA_eff·ρ.
+#
+# For oblique incidence the focal spot is at distance f/cos(α) from
+# the aperture centre (not f), so the aperture subtends a smaller
+# half-angle and the effective NA is reduced:
+#
+#   NA_eff = R cos(α) / √(R² cos²(α) + f²)
+#
+# This reduces to R/√(R²+f²) at normal incidence.
+NA_normal = R / sqrt(R^2 + f^2)
+NA_eff    = R * cos(alpha_a) / sqrt((R * cos(alpha_a))^2 + f^2)
+rho_airy1 = 3.8317 / (k * NA_eff)
+println("  NA (normal) = $(round(NA_normal, digits=4)),  " *
+        "NA_eff (α=$(round(rad2deg(alpha_a), digits=1))°) = $(round(NA_eff, digits=4))")
+println("  Airy first zero (oblique) = $(round(rho_airy1/lambda, digits=3)) λ  " *
+        "(normal would be $(round(3.8317/(k*NA_normal)/lambda, digits=3)) λ)")
 
 # Check: the ψ-averaged radial profile should have a local minimum near ρ_airy1
 # Find local minima in the ψ-averaged profile
