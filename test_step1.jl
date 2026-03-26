@@ -211,7 +211,7 @@ Er_9 = randn(ComplexF64, Nr, Ntheta)
 Et_9 = zeros(ComplexF64, Nr, Ntheta)
 
 # Get ALL modes (m = 0 to Ntheta-1 to span the full FFT)
-M_max_9 = Ntheta ÷ 2   # max extractable without aliasing
+M_max_9 = (Ntheta - 1) ÷ 2   # max extractable: need 2*M+1 ≤ Ntheta
 Em_r_9, _, m_pos_9 = angular_decompose(Er_9, Et_9, M_max_9)
 
 # Also get negative modes from the full FFT
