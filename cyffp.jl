@@ -78,9 +78,10 @@ end
 #   A(s) = ∫ g(t) K_ν(s+t) dt,   g(t) = r₀ eᵗ f(r₀ eᵗ),  K_ν(τ) = J_ν(eᵗ)
 #
 # In Fourier space:  Â(q) = ĝ(q) · û(q)
-# where the filter kernel is:
-#   û(q) = Γ((ν+1+q)/2) / Γ((ν+1-q)/2) · 2^q
-# with q = 2πn/(N·Δln) being the DFT frequency values.
+# where the filter kernel (FFTW convention) is:
+#   û(q) = 2^{-iq} Γ((ν+1-iq)/2) / Γ((ν+1+iq)/2)
+# with q = 2πn/(N·Δln) being real DFT frequency values.
+# |û(q)| = 1 for all q (conjugate Gamma pair).
 #
 # Input f_r must be sampled on a log-spaced grid:
 #   r[j] = r₀ · exp(j · Δln),   j = 0, ..., N-1
@@ -121,28 +122,28 @@ function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
     q     = @. (2π / (N * dln)) * n_idx
 
-    # Filter kernel: û(q) = Γ((ν+1+q)/2) / Γ((ν+1-q)/2) · 2^q
-    # where q = 2πn/(N·Δln) are the DFT frequency values (real).
-    # The Gamma arguments are made complex to handle the loggamma
-    # branch cut for negative real arguments at large |ν|.
+    # Filter kernel for FFTW convention (e^{-iqτ} Fourier transform
+    # of K_ν(τ) = J_ν(eᵗ)):
     #
-    # The kernel grows exponentially with |q|.  For large grids
-    # (small Δln), q_max = π/Δln can reach 100+, making the kernel
-    # ~10^{155} — beyond Float64 range.  We cap the log-magnitude
-    # to avoid overflow: high-q FFT components of any smooth input
-    # are at machine epsilon anyway, so this loses nothing.
+    #   û(q) = 2^{-iq} Γ((ν+1-iq)/2) / Γ((ν+1+iq)/2)
+    #
+    # where q = 2πn/(NΔln) are real DFT frequency values.
+    #
+    # Key property: the two Gamma arguments are complex conjugates,
+    # so |û(q)| = 1 for all q.  No overflow possible.
+    #
+    # Derivation: the Mellin transform M[J_ν](s) = 2^{s-1} Γ((ν+s)/2)
+    # / Γ((ν+2-s)/2).  With s = 1 - iq (from the log substitution
+    # r = eᵗ and FFTW's e^{-iqτ} convention):
+    # û(q) = 2^{-iq} Γ((ν+1-iq)/2) / Γ((ν+1+iq)/2).
     U_c = map(q) do qj
-        a = complex((nu + 1.0 + qj) / 2)
-        b = complex((nu + 1.0 - qj) / 2)
-        log_kernel = loggamma(a) - loggamma(b) + qj * log(2.0)
-        if real(log_kernel) > 200.0    # exp(200) ≈ 10^87, safe for Float64
-            return zero(ComplexF64)
-        end
-        exp(log_kernel)
+        a = complex((nu + 1.0) / 2, -qj / 2)   # (ν+1-iq)/2
+        b = complex((nu + 1.0) / 2, +qj / 2)   # (ν+1+iq)/2
+        exp(loggamma(a) - loggamma(b) - im * qj * log(2.0))
     end
 
     F = fft(complex.(f_r))
-    return ifft(F .* U_c)
+    return dln .* ifft(F .* U_c)
 end
 
 end  # module CyFFP
