@@ -651,8 +651,8 @@ The two differ only by a sign in the (TE$-$TM) vs (TM$-$TE) ordering.
 
 \noindent
 \textbf{Consequence:} For either polarization, only $m = 0,1,\ldots,M_{\max}$
-need be computed.  The code accepts a \texttt{polarization} flag (\texttt{:y} or
-\texttt{:x}) to select the correct sign.
+need be computed.  An implementation should accept a polarization flag to select
+the correct sign in the negative-$m$ reconstruction.
 
 
 %=======================================================================
@@ -981,7 +981,8 @@ $A^{\mathrm{TE}}_m$, $A^{\mathrm{TM}}_m$.
 
 \textbf{Step 3} --- Propagation + symmetry:
 $\tilde A_m = (A^{\mathrm{TE}}_m+A^{\mathrm{TM}}_m)e^{ik_z f}$;\;
-$\tilde A_{-m} = (-1)^m(A^{\mathrm{TM}}_m-A^{\mathrm{TE}}_m)e^{ik_z f}$.
+$\tilde A_{-m} = (-1)^m(A^{\mathrm{TE}}_m - A^{\mathrm{TM}}_m)e^{ik_z f}$ ($y$-pol)
+or $(A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m)$ ($x$-pol); see~\eqref{eq:Atilde_neg_y}--\eqref{eq:Atilde_neg_x}.
 
 \textbf{Step 4} --- Graf shift: $B_l = \sum_m \tilde A_{m+l}\,J_m(k_r x_0)$.
 
@@ -1000,28 +1001,118 @@ $\tilde A_{-m} = (-1)^m(A^{\mathrm{TM}}_m-A^{\mathrm{TE}}_m)e^{ik_z f}$.
 
 
 %=======================================================================
-\section{Performance Optimizations}
+\section{Comparison with the Brute-Force Cartesian Approach}
+\label{sec:cartesian}
 %=======================================================================
+
+The most straightforward alternative is to place the near field on a 2D Cartesian
+grid and propagate via 2D FFT (angular spectrum method):
+\begin{enumerate}[nosep]
+  \item Sample $\E(x,y,0)$ on a uniform grid with spacing $\Delta x \le \lambda/2$
+        covering $[-R, R]^2$.
+  \item 2D FFT $\to$ angular spectrum $U(k_x, k_y)$.
+  \item Multiply by $e^{ik_z f}$, zero out evanescent modes.
+  \item 2D IFFT $\to$ field at $z = f$.  Extract PSF near $(f\tan\alpha, 0)$.
+\end{enumerate}
+
+\paragraph{Grid size.}
+$N_x = N_y = 2R/(\lambda/2) = 4R/\lambda$.
+For $R = 2$\,mm, $\lambda = 500$\,nm: $N_x = 16000$.  The grid has
+${\sim}2.6\times 10^8$ points.
+
+\paragraph{Cost and memory.}
+Each complex array occupies $N_x^2 \times 16$\,bytes $\approx 4.3$\,GB.
+Two to three working arrays require ${\sim}10$--$13$\,GB.
+The two 2D FFTs cost $O(N_x^2 \log N_x^2)$ $\approx 7.5\times 10^9$ operations,
+taking ${\sim}3$--$4$ seconds on a modern CPU.
+
+\paragraph{Scaling.}
+The critical weakness is that the grid grows as $(R/\lambda)^2$:
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+$R/\lambda$ & Cartesian grid & Memory (per array) & CyFFP $N_r$ (1D) \\
+\midrule
+4\,000 (2\,mm, 500\,nm) & $16\,384^2$ & 4.3\,GB & 131\,072 \\
+10\,000 (5\,mm)          & $40\,960^2$ & 27\,GB  & 327\,680 \\
+20\,000 (1\,cm)          & $81\,920^2$ & 107\,GB & 655\,360 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+For a 1\,cm visible-wavelength lens the Cartesian approach requires ${\sim}100$\,GB
+per array and is impractical on commodity hardware, while CyFFP uses a 1D radial
+grid of ${\sim}655$\,K points (${\sim}10$\,MB).
+
+\paragraph{When Cartesian wins.}
+If the full field over the entire focal plane is needed (not just the PSF patch),
+or if the structure is \emph{not} axisymmetric (so cylindrical decomposition
+does not apply), the Cartesian approach is the only option.
+
+
+%=======================================================================
+\section{Implementation Recommendations}
+\label{sec:implementation}
+%=======================================================================
+
+\subsection{Recommended optimizations}
+
+An efficient implementation should incorporate the following:
 
 \begin{center}
 \begin{tabular}{@{}lll@{}}
 \toprule
 \textbf{Optimization} & \textbf{Speedup} & \textbf{Mechanism} \\
 \midrule
-Negative-$m$ symmetry & $2\times$ on Step~2 & Only $m \ge 0$ computed \\
-$E_\theta = 0$ detection & $2\times$ on Step~2 & 2 FFTLog calls instead of 4 \\
-Neumann shift (LPA) & ${\sim}M_{\max}\times$ on Step~2 & 1 FFTLog instead of $M_{\max}$ \\
-Bessel truncation & ${\sim}4\times$ on Step~4
-  & $m_{\mathrm{cut}} = \min(M_{\max},\lceil k_r x_0\rceil+20)$ \\
-Miller backward recurrence & ${\sim}10\times$ on Bessel eval
-  & $J_0\ldots J_{M_{\max}}$ in one $O(M)$ pass \\
-\texttt{@simd} inner loop & $2$--$4\times$ on Step~4
-  & SIMD vectorization of dot product \\
-\texttt{Threads.@threads} & ${\sim}N_{\mathrm{threads}}\times$
-  & Steps 2, 4, 5, 6 parallelized \\
+Negative-$m$ symmetry & $2\times$ on Step~2 & Compute only $m \ge 0$;
+  reconstruct $m < 0$ algebraically \\
+$E_\theta = 0$ detection & $2\times$ on Step~2
+  & Skip the two $\theta$-component FFTLog calls when $E_{m,\theta} \equiv 0$ \\
+Neumann shift (LPA fields) & ${\sim}M_{\max}\times$ on Step~2
+  & Replace $M_{\max}$ FFTLog calls by 1 call $+$ interpolation $+$ FFT \\
+Bessel truncation in Graf shift & ${\sim}4\times$ on Step~4
+  & Truncate sum at $|m| \le \min(M_{\max},\,\lceil k_r x_0\rceil + 20)$ \\
+Miller backward recurrence & ${\sim}10\times$ on Bessel evaluation
+  & Compute $J_0(x),\ldots,J_{M}(x)$ in one $O(M)$ pass \\
+SIMD vectorization & $2$--$4\times$ on Step~4 inner loop
+  & The dot product $\sum_m \tilde A_{m+l} J_m$ is SIMD-friendly \\
+Shared-memory threading & ${\sim}N_{\mathrm{threads}}\times$
+  & Steps 2, 4, 5, 6 are embarrassingly parallel \\
 \bottomrule
 \end{tabular}
 \end{center}
+
+\subsection{Threading considerations}
+
+Steps 2 and 4 dominate the computation.  Both are embarrassingly parallel:
+\begin{itemize}[nosep]
+  \item \textbf{Step 2}: each mode $m$ is independent.  Shared-memory threads
+        avoid the serialization overhead of distributed workers (the modal data
+        matrices can be large: $N_r \times M_{\max} \times 16$\,bytes).
+  \item \textbf{Step 4}: each $k_r$ point is independent.
+  \item \textbf{Steps 5--6}: each local mode $l$ (Step~5) or radial point $\rho_j$
+        (Step~6) is independent.
+\end{itemize}
+Care is needed with FFT plan caching: the FFT plan for a given array size should
+be created once (single-threaded) before entering the parallel region.
+
+\subsection{Entry points}
+
+A well-designed implementation should provide at least three entry points:
+\begin{enumerate}[nosep]
+  \item \textbf{Full-field driver}: accepts $\E(r,\theta)$ on a 2D grid, performs
+        the angular FFT (Step~1) internally, then runs Steps 2--6.
+        Useful for validation with analytical 2D fields.
+  \item \textbf{Modal driver}: accepts pre-decomposed modes $E_{m,r}(r)$,
+        $E_{m,\theta}(r)$ for $m \ge 0$ directly from FDTD/RCWA.
+        Skips Step~1 entirely.  This is the primary production interface.
+  \item \textbf{Neumann shift driver}: accepts only the radial transmission $t(r)$
+        and the oblique angle.  Uses the Neumann shift theorem (\S\ref{sec:neumann})
+        to bypass per-mode FFTLog calls.  Applicable when the near field factors as
+        $t(r)\cdot e^{ik_x r\cos\theta}$ (LPA / angle-insensitive metalens model).
+\end{enumerate}
 
 
 %=======================================================================
