@@ -76,12 +76,47 @@ The tangential electric field at $z=0$ is written
   \qquad
   \E^{\mathrm{Near}}_m(r) = E_{m,r}(r)\,\rhat + E_{m,\theta}(r)\,\that.
 \end{equation}
-The modal amplitudes are extracted by discrete Fourier transform over~$\theta$:
+
+\paragraph{Primary workflow: modes from FDTD/RCWA.}
+For a rotationally symmetric structure, FDTD and RCWA can solve Maxwell's equations
+independently for each angular-momentum index $m$.  The output of each simulation is
+directly the modal near field $\E^{\mathrm{Near}}_m(r)$ --- even when the incident
+field (oblique plane wave) is not rotationally symmetric.  In this workflow, the
+modes $E_{m,r}(r)$, $E_{m,\theta}(r)$ are \textbf{available for each $m$ separately}
+and there is no need to construct or Fourier-transform a 2D field $\E(r,\theta)$.
+The appropriate entry point is \texttt{cyfft\_farfield\_modal}, which accepts
+the modes for $m \ge 0$ directly.
+
+\paragraph{Secondary workflow: analytical or synthetic 2D fields.}
+When a closed-form expression for $\E(r,\theta)$ is available (e.g.\ for validation),
+the modal amplitudes are extracted by discrete Fourier transform over $\theta$:
 \begin{equation}
   E_{m,r/\theta}(r_j)
   = \frac{1}{N_\theta}\sum_{l=0}^{N_\theta-1}
     E_{r/\theta}(r_j,\theta_l)\,e^{-im\theta_l}.
 \end{equation}
+This is Step~1 (angular FFT) and is needed only in this secondary workflow.
+
+\paragraph{Analytical decomposition for specific field forms.}
+Some near fields admit closed-form $E_m(r)$ without requiring an FFT over $\theta$:
+
+\begin{itemize}[nosep]
+  \item \textbf{LPA / normal lens $+$ oblique wave:}
+    $\E = t(r)\,e^{ik_x r\cos\theta}(\cos\theta\,\rhat - \sin\theta\,\that)$.
+    The Jacobi--Anger expansion gives an analytical $E_m(r)$
+    (see \S\ref{sec:neumann}).  This is the fast-path case handled by
+    \texttt{cyfft\_farfield\_shift}.
+
+  \item \textbf{Ideal oblique lens:}
+    $u(r,\theta) = \exp(-ik[\sqrt{(r\cos\theta-x_0)^2 + r^2\sin^2\theta + f^2} - f])$.
+    The $\theta$-dependence is inside a square root, so \textbf{no closed-form
+    Jacobi--Anger decomposition exists}.  Computing $E_m(r)$ requires either
+    (a)~numerical FFT over $\theta$ at each $r_j$, or
+    (b)~numerical quadrature of $\frac{1}{2\pi}\int_0^{2\pi} u(r,\theta)\,e^{-im\theta}\,d\theta$.
+    This form is used for validation only; in practice, a real metalens designed
+    for oblique incidence would be simulated in FDTD (primary workflow), which
+    directly provides $E_m(r)$.
+\end{itemize}
 
 \subsection{Bessel recurrence relations}
 
