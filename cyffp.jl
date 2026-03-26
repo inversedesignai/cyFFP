@@ -344,8 +344,9 @@ end
 """
     _besselj_range(m_max, x) -> Vector{Float64}
 
-Compute J_0(x), J_1(x), ..., J_{m_max}(x) via Miller backward recurrence.
-Normalized against besselj(0, x).  ~10× faster than individual besselj calls.
+Compute J_0(x), J_1(x), ..., J_{m_max}(x).
+Uses Miller backward recurrence for moderate x (fast, ~10× vs individual calls).
+Falls back to individual besselj calls for large x (where recurrence overflows).
 """
 function _besselj_range(m_max::Int, x::Float64)
     if m_max < 0; return Float64[]; end
@@ -354,11 +355,19 @@ function _besselj_range(m_max::Int, x::Float64)
         out[1] = 1.0   # J_0(0) = 1
         return out
     end
-    # Miller backward recurrence: start above m_max but not so far
-    # that intermediate values overflow.  The recurrence amplifies by
-    # ~(2m/x) per step, so starting too far above x causes overflow
-    # for small x.
-    m_start = m_max + max(30, ceil(Int, 15 * sqrt(max(1.0, abs(x)))))
+
+    # For large x, the Miller recurrence overflows (intermediate values
+    # reach ~2^x before normalization).  Fall back to direct computation.
+    if abs(x) > 500.0 || m_max > 500
+        out = Vector{Float64}(undef, m_max + 1)
+        for m in 0:m_max
+            out[m + 1] = besselj(m, x)
+        end
+        return out
+    end
+
+    # Miller backward recurrence: must start ABOVE both m_max and x.
+    m_start = max(m_max, ceil(Int, abs(x))) + max(30, ceil(Int, 15 * sqrt(max(1.0, abs(x)))))
     jnp1 = 0.0
     jn   = 1.0
     out  = zeros(Float64, m_max + 1)

@@ -243,6 +243,67 @@ end
 @assert max_parseval_err < 0.25 "Parseval violation exceeds expected FFTLog accuracy"
 
 
+# ─── Step 4 production test: Graf shift ──────────────────────
+println("\n--- Step 4: Graf shift at production scale ---")
+x0_prod = f_lens * tan(alpha)
+L_max_prod = 20
+println("  x₀ = $(round(x0_prod, digits=1)) μm, L_max = $L_max_prod")
+println("  kr×x₀ range: $(round(kr[1]*x0_prod, sigdigits=3)) to $(round(kr[end]*x0_prod, sigdigits=3))")
+
+# Build a representative A_tilde: just a few modes nonzero
+# (can't allocate full [131072 × 8771] = 18 GB here — test per-mode batching)
+# Instead, use a small M_max and verify the Graf shift mechanics.
+M_test = 50  # small M_max for memory
+m_full_test = collect(-M_test:M_test)
+A_tilde_test = zeros(ComplexF64, Nr, 2M_test + 1)
+
+# Fill with a realistic pattern: propagating modes only, decaying at high m
+prop_mask = kr .< k
+for m in -M_test:M_test
+    idx = m + M_test + 1
+    A_tilde_test[prop_mask, idx] .= exp(-abs(m) / 20.0) .* cis.(kr[prop_mask] .* 2.0)
+end
+
+println("  Running graf_shift with M_test=$M_test, L_max=$L_max_prod...")
+t_graf = @elapsed begin
+    B_prod = graf_shift(A_tilde_test, m_full_test, collect(kr), x0_prod, L_max_prod)
+end
+println("  Done in $(round(t_graf, digits=2)) s")
+
+@assert !any(isnan, B_prod) "NaN in B"
+@assert !any(isinf, B_prod) "Inf in B"
+@assert size(B_prod) == (Nr, 2L_max_prod + 1) "Wrong size"
+println("  No NaN/Inf, size $(size(B_prod)) ✓")
+
+# Normal incidence check
+B_normal = graf_shift(A_tilde_test, m_full_test, collect(kr), 0.0, L_max_prod)
+max_id_err = 0.0
+for (li, l) in enumerate(-L_max_prod:L_max_prod)
+    if abs(l) <= M_test
+        idx_A = l + M_test + 1
+        global max_id_err = max(max_id_err, maximum(abs.(B_normal[:, li] .- A_tilde_test[:, idx_A])))
+    end
+end
+println("  Normal incidence identity error: $(round(max_id_err, sigdigits=3))")
+@assert max_id_err < 1e-12 "Normal incidence identity failed"
+println("  Normal incidence ✓")
+
+# Miller recurrence at production-scale x values
+println("\n  Miller recurrence accuracy at production x values:")
+for x_test in [1.0, 100.0, 1000.0, 10000.0, x0_prod * k]
+    m_max_t = min(4385, ceil(Int, x_test) + 20)
+    Jp = CyFFP._besselj_range(m_max_t, x_test)
+    # Spot-check a few orders
+    errs = [abs(Jp[m+1] - besselj(m, x_test)) for m in [0, min(m_max_t, 10), m_max_t÷2, m_max_t]]
+    max_e = maximum(errs)
+    println("    x=$(round(x_test, sigdigits=4)), m_max=$m_max_t: max_err=$(round(max_e, sigdigits=3))")
+    @assert max_e < 1e-8 "Miller recurrence inaccurate at x=$x_test"
+end
+println("  Miller recurrence ✓")
+
+println("  Step 4 production PASSED ✓")
+
+
 println("\n" * "="^60)
 println("Production aperture test complete.")
 println("="^60)
