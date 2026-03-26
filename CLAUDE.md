@@ -16,6 +16,8 @@ julia test_step1.jl          # Angular decomposition
 julia test_step2_fftlog.jl   # FFTLog Hankel transform
 julia test_step3.jl          # Scalar propagation + symmetry
 julia test_step4.jl          # Graf shift
+julia test_step5.jl          # Inverse Hankel
+julia test_step6.jl          # Angular synthesis + full pipeline Airy
 
 # End-to-end validation
 julia test_scalar_airy.jl         # Airy disk with small lens (R=3λ)
@@ -55,8 +57,8 @@ Single-module design in `cyffp.jl`. The scalar pipeline propagates a single Cart
 2. **Scalar spectral coefficients** (`compute_scalar_coeffs`) — FFTLog at order m; ONE transform per mode: a_m(kr) = H_m[r u_m](kr); threaded over modes
 3. **Propagation + symmetry** (`propagate_scalar`) — Apply exp(ikz f), reconstruct negative-m via scalar symmetry ã_{-m} = (-1)^m ã_m
 4. **Graf shift** (`graf_shift`) — Mode convolution `B_l = Σ_m ã_{m+l} J_m(kr x₀)`; Miller backward recurrence for Bessel weights; @simd inner loop; threaded over kr
-5. **Inverse Hankel** — FFTLog in local basis; only 2L_max+1 calls (not yet implemented)
-6. **Angular synthesis** — IFFT over local modes (not yet implemented)
+5. **Inverse Hankel** (`inverse_hankel`) — FFTLog in local basis; only 2L_max+1 calls (~27); output ρ-grid = reciprocal of kr-grid = original r-grid; threaded over modes
+6. **Angular synthesis** (`angular_synthesis`) — IFFT over local modes; u(ρ,ψ) = Σ_l b_l(ρ) e^{ilψ}; take |u|² for PSF intensity
 
 ### Neumann shift-theorem fast path (not yet implemented)
 

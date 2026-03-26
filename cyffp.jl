@@ -24,7 +24,7 @@ using SpecialFunctions: loggamma, besselj
 
 export angular_decompose, fftlog_hankel,
        compute_scalar_coeffs, propagate_scalar,
-       graf_shift
+       graf_shift, inverse_hankel, angular_synthesis
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -430,6 +430,134 @@ function graf_shift(A_tilde::Matrix{ComplexF64},
         end
     end
     return B
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 5 — Inverse Hankel Transform
+#
+# Transform from spectral (kr) to spatial (ρ) domain:
+#
+#   b_l(ρ) = ∫₀^∞ B_l(kr) J_l(kr ρ) kr dkr
+#
+# This is a Hankel transform with the kr dkr measure.  Using
+# fftlog_hankel (which computes ∫ f(x) J_ν(xy) dx with plain dx
+# measure and returns y × H_ν[f](y)):
+#
+#   1. Pre-multiply: f(kr) = kr × B_l(kr)
+#   2. raw = fftlog_hankel(f, dln, l)  →  returns ρ × b_l(ρ)
+#   3. b_l = raw / ρ
+#
+# The output ρ grid is the reciprocal of the kr grid, which equals
+# the original r grid from Step 2.
+#
+# Only 2L_max + 1 FFTLog calls are needed (typically ~27).
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    inverse_hankel(B, L_max, kr_grid) -> (b, rho_grid)
+
+Compute b_l(ρ) = ∫ B_l(kr) J_l(kr ρ) kr dkr for each local mode
+l = -L_max, ..., L_max via FFTLog.
+
+# Arguments
+- `B[Nkr, 2L_max+1]` : local spectral coefficients from graf_shift
+- `L_max`              : local mode truncation
+- `kr_grid[Nkr]`       : log-spaced kr grid
+
+# Returns
+- `b[Nrho, 2L_max+1]` : local spatial coefficients on the ρ grid
+- `rho_grid[Nrho]`      : output ρ grid (= reciprocal of kr grid)
+"""
+function inverse_hankel(B::Matrix{ComplexF64},
+                         L_max::Int,
+                         kr_grid::Vector{Float64})
+    Nkr = length(kr_grid)
+    Nl  = 2L_max + 1
+    @assert size(B) == (Nkr, Nl) "B size mismatch: got $(size(B)), expected ($Nkr, $Nl)"
+
+    dln = log(kr_grid[2] / kr_grid[1])
+
+    # Output ρ grid: reciprocal of kr grid
+    rho_grid = exp.(log(1.0 / kr_grid[end]) .+ dln .* (0:Nkr-1))
+
+    b = zeros(ComplexF64, Nkr, Nl)
+
+    # Warm FFTW plan cache
+    fftlog_hankel(zeros(ComplexF64, Nkr), dln, 0.0)
+
+    Threads.@threads for li in 1:Nl
+        l = li - L_max - 1   # l = -L_max, ..., L_max
+
+        # b_l(ρ) = ∫ B_l(kr) J_l(kr ρ) kr dkr
+        # Pre-multiply by kr for the kr dkr measure
+        f = kr_grid .* B[:, li]
+
+        # FFTLog returns ρ × b_l(ρ)
+        raw = fftlog_hankel(f, dln, Float64(l))
+
+        # Divide by ρ to get b_l(ρ)
+        b[:, li] .= raw ./ rho_grid
+    end
+
+    return b, rho_grid
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 6 — Angular Synthesis
+#
+# Reconstruct the 2D PSF from local modes:
+#
+#   u(ρ_j, ψ_s) = Σ_{l=-L_max}^{L_max} b_l(ρ_j) e^{il ψ_s}
+#
+# where ψ_s = 2π s / N_ψ,  s = 0, ..., N_ψ - 1.
+#
+# This is an inverse DFT over the mode index l at each ρ point.
+# FFTW convention: ifft(X)[s] = (1/N) Σ_k X[k] e^{+2πi ks/N}
+# We want: u[s] = Σ_l b_l e^{+2πi ls/N_ψ} = N_ψ × ifft(b_fft)[s]
+#
+# Modes are placed in FFTW order:
+#   l ≥ 0 → index l + 1
+#   l < 0 → index N_ψ + l + 1
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    angular_synthesis(b, L_max, N_psi) -> (u, psi)
+
+Reconstruct u(ρ,ψ) = Σ_l b_l(ρ) e^{ilψ} via IFFT over the mode
+index at each radial point.
+
+# Arguments
+- `b[Nrho, 2L_max+1]` : local spatial coefficients from inverse_hankel
+- `L_max`               : local mode truncation
+- `N_psi`               : number of azimuthal output points (≥ 2L_max+1)
+
+# Returns
+- `u[Nrho, N_psi]` : complex field; PSF intensity = |u|²
+- `psi[N_psi]`      : azimuthal angles ψ_s = 2π s / N_ψ
+"""
+function angular_synthesis(b::Matrix{ComplexF64},
+                            L_max::Int,
+                            N_psi::Int)
+    Nrho = size(b, 1)
+    Nl   = 2L_max + 1
+    @assert size(b, 2) == Nl "b has $(size(b,2)) columns, expected $Nl"
+    @assert N_psi >= Nl "N_psi=$N_psi too small for L_max=$L_max (need ≥ $Nl)"
+
+    # Arrange modes in FFTW order
+    b_fft = zeros(ComplexF64, Nrho, N_psi)
+    for (li, l) in enumerate(-L_max:L_max)
+        col = l >= 0 ? l + 1 : N_psi + l + 1
+        b_fft[:, col] .= b[:, li]
+    end
+
+    # u[s] = Σ_l b_l e^{2πi ls/N_ψ} = N_ψ × ifft(b_fft)[s]
+    u = ifft(b_fft, 2) .* N_psi
+
+    psi = collect(range(0.0, 2π, length=N_psi+1)[1:end-1])
+
+    return u, psi
 end
 
 end  # module CyFFP
