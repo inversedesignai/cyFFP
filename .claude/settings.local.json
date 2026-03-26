@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(julia -e ':*)",
+      "Bash(julia test_step2_fftlog.jl)",
+      "Bash(julia test_step2_te_tm.jl)",
+      "Bash(julia -t auto test_production_aperture.jl)",
+      "Bash(julia test_step3.jl)",
+      "Bash(julia test_step4.jl)"
+    ]
+  }
+}
