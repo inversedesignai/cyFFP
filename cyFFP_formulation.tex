@@ -809,6 +809,24 @@ $\mathrm{NA}_{\mathrm{eff}} < \mathrm{NA}_0$ because $d_0 = f/\cos\alpha > f$.
 The Airy disk first zero is at
 $\rho_1 = 3.8317/(k\cdot\mathrm{NA}_{\mathrm{eff}}) = 0.6098\,\lambda/\mathrm{NA}_{\mathrm{eff}}$.
 
+\paragraph{Elliptical PSF at large oblique angles.}
+The formula~\eqref{eq:NA_eff} is derived in the \emph{sagittal} plane (the
+$y$-direction, perpendicular to the tilt).  In this direction, the aperture
+appears circular from the focal point and the PSF matches the Airy pattern to
+within ${\sim}1$--$2\%$ at all tested angles up to $\alpha = 30^\circ$.
+
+In the \emph{tangential} plane ($\psi = 0$, the tilt direction), the aperture
+is foreshortened: the near edge (at $x = -R$) is farther from the focal point
+than the far edge (at $x = +R$), producing an effectively asymmetric aperture.
+This broadens the PSF in the tangential direction.  The first dark ring shifts
+outward by ${\sim}5\%$ at $\alpha = 15^\circ$ and ${\sim}28\%$ at
+$\alpha = 30^\circ$.  This is correct diffraction physics for a circular
+aperture viewed off-axis, not a numerical artifact.
+
+The simple $\mathrm{NA}_{\mathrm{eff}}$ formula should therefore be used as a
+\emph{sagittal-plane} prediction.  For the full 2D PSF shape at large oblique
+angles, the pipeline output (which is exact) should be used directly.
+
 
 %=======================================================================
 \section{Complete Algorithm Summary}

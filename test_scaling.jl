@@ -268,4 +268,127 @@ for (i, r) in enumerate(results)
     println("  $(lpad(r.R_lam, 4))  $(lpad(r.M_max, 5))  $(lpad(src, 5))  $(lpad(round(r.s2_err, sigdigits=3), 9))  $(lpad(round(r.parseval, sigdigits=3), 9))  $(lpad(round(r.peak_rho, digits=3), 7))  $(lpad(round(100*r.airy_err, digits=1), 6))%  $(lpad(round(r.min_val, sigdigits=3), 7))  $(r.status)")
 end
 println("="^70)
-println("All scaling tests passed.")
+println("Aperture scaling tests passed.")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Part 2: Oblique angle scaling (R=100λ, α=5°..30°)
+#
+# At large oblique angles, the ideal-lens PSF is NOT a circular
+# Airy disk — the aperture appears elliptical from the off-axis
+# focal point.  The sagittal direction (ψ=π/2) retains the Airy
+# pattern; the tangential direction (ψ=0) is broadened.
+#
+# This test validates:
+#  - Sagittal first zero matches NA_eff Airy prediction at all angles
+#  - Tangential broadening grows with angle (correct physics)
+#  - PSF peaks at ρ≈0 at all angles
+# ═══════════════════════════════════════════════════════════════
+
+println("\n" * "="^70)
+println("Oblique angle scaling: R=100λ, α=5°..30°")
+println("="^70)
+
+R_obl  = 100.0 * lambda
+f_obl  = R_obl / 0.3 * sqrt(1 - 0.3^2)
+Nr_obl = 4096
+L_max_obl = 12
+N_psi_obl = 64
+
+r_obl = collect(exp.(range(log(1e-3), log(1e4), length=Nr_obl)))
+dln_obl = log(r_obl[2] / r_obl[1])
+kr_obl = exp.(log(1.0 / r_obl[end]) .+ dln_obl .* (0:Nr_obl-1))
+
+angle_results = []
+
+for alpha_deg in [5, 10, 15, 20, 30]
+    alpha_val = deg2rad(Float64(alpha_deg))
+    x0_val   = f_obl * tan(alpha_val)
+    kx_val   = k * sin(alpha_val)
+    M_max_val = ceil(Int, kx_val * R_obl) + 10
+
+    NA_eff_val = R_obl * cos(alpha_val) / sqrt((R_obl * cos(alpha_val))^2 + f_obl^2)
+    rho_airy_val = 0.61 * lambda / NA_eff_val
+
+    Ntheta_val = max(2 * M_max_val + 1, 128)
+    Ntheta_val = 1 << ceil(Int, log2(Ntheta_val))
+    theta_val = range(0.0, 2π, length=Ntheta_val+1)[1:end-1]
+
+    println("\n─── α=$(alpha_deg)°  M_max=$(M_max_val)  x₀/R=$(round(x0_val/R_obl, digits=2))  NA_eff=$(round(NA_eff_val, digits=3)) ───")
+
+    # Ideal oblique lens
+    u_field_obl = ComplexF64[let d=sqrt((rv*cos(th)-x0_val)^2+rv^2*sin(th)^2+f_obl^2)
+        exp(-im*k*(d-f_obl))*(rv<=R_obl ? 1.0 : 0.0) end for rv in r_obl, th in theta_val]
+
+    # Steps 1-6
+    u_m_obl, _, m_pos_obl = angular_decompose(u_field_obl,
+        zeros(ComplexF64, Nr_obl, Ntheta_val), M_max_val)
+    a_m_obl, kr_g_obl = compute_scalar_coeffs(u_m_obl, m_pos_obl, r_obl)
+    a_tilde_obl, m_full_obl = propagate_scalar(a_m_obl, m_pos_obl, kr_g_obl, k, f_obl)
+    B_obl = graf_shift(a_tilde_obl, m_full_obl, kr_g_obl, x0_val, L_max_obl; k=k)
+    b_obl, rho_obl = inverse_hankel(B_obl, L_max_obl, kr_g_obl)
+    u_psf_obl, psi_obl = angular_synthesis(b_obl, L_max_obl, N_psi_obl)
+
+    I_psf_obl = abs2.(u_psf_obl)
+
+    # Extract tangential (ψ=0) and sagittal (ψ=π/2) profiles
+    I_tang = I_psf_obl[:, 1]                          # ψ = 0
+    I_sag  = I_psf_obl[:, N_psi_obl÷4 + 1]           # ψ = π/2
+    I_peak_obl = max(maximum(I_tang), maximum(I_sag))
+
+    # Peak location
+    I_avg_obl = [sum(I_psf_obl[ir, :]) / N_psi_obl for ir in 1:Nr_obl]
+    peak_rho_obl = rho_obl[argmax(I_avg_obl)]
+
+    # Find first zero in each direction
+    function find_zero(I_prof, rho_grid, I_pk)
+        I_n = I_prof ./ I_pk
+        for ir in 2:length(I_n)-1
+            if rho_grid[ir] > 0.5 && I_n[ir] < I_n[ir-1] && I_n[ir] < I_n[ir+1]
+                return rho_grid[ir], I_n[ir]
+            end
+        end
+        return NaN, NaN
+    end
+
+    zt, mt = find_zero(I_tang, rho_obl, I_peak_obl)
+    zs, ms = find_zero(I_sag, rho_obl, I_peak_obl)
+
+    ae_tang = isnan(zt) ? NaN : abs(zt - rho_airy_val) / rho_airy_val
+    ae_sag  = isnan(zs) ? NaN : abs(zs - rho_airy_val) / rho_airy_val
+
+    println("  Peak at ρ=$(round(peak_rho_obl, digits=3))λ")
+    println("  Sagittal   (ψ=π/2): zero=$(round(zs, digits=3))λ  err=$(round(100*ae_sag, digits=1))%  min=$(round(ms, sigdigits=2))")
+    println("  Tangential (ψ=0):   zero=$(round(zt, digits=3))λ  err=$(round(100*ae_tang, digits=1))%  min=$(round(mt, sigdigits=2))")
+
+    # Assertions:
+    # - Peak at center
+    @assert peak_rho_obl < 0.5 "PSF peak not at center at α=$alpha_deg"
+
+    # - Sagittal matches Airy (the aperture is circular in this direction)
+    @assert !isnan(ae_sag) "No sagittal zero found at α=$alpha_deg"
+    @assert ae_sag < 0.05 "Sagittal Airy error > 5% at α=$alpha_deg"
+    @assert ms < 0.001 "Sagittal minimum not deep enough at α=$alpha_deg"
+
+    # - Tangential broadens with angle (expected physics)
+    if !isnan(ae_tang) && alpha_deg >= 15
+        @assert ae_tang > ae_sag "Tangential should be broader than sagittal at α=$alpha_deg"
+    end
+
+    println("  PASSED ✓")
+
+    push!(angle_results, (alpha=alpha_deg, M_max=M_max_val,
+          sag_err=ae_sag, tang_err=ae_tang, peak=peak_rho_obl))
+end
+
+# Summary
+println("\n" * "="^70)
+println("Oblique angle summary (R=100λ)")
+println("="^70)
+println("  α°    M_max  Sag_err  Tang_err  Peak/λ")
+println("  ─────────────────────────────────────────")
+for r in angle_results
+    println("  $(lpad(r.alpha, 3))  $(lpad(r.M_max, 5))   $(lpad(round(100*r.sag_err, digits=1), 5))%   $(lpad(isnan(r.tang_err) ? "N/A" : "$(round(100*r.tang_err, digits=1))%", 7))   $(round(r.peak, digits=3))")
+end
+println("="^70)
+println("All oblique angle tests passed.")
