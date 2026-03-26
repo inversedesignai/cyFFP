@@ -1062,24 +1062,46 @@ does not apply), the Cartesian approach is the only option.
 An efficient implementation should incorporate the following:
 
 \begin{center}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}l l p{7cm}@{}}
 \toprule
 \textbf{Optimization} & \textbf{Speedup} & \textbf{Mechanism} \\
 \midrule
-Negative-$m$ symmetry & $2\times$ on Step~2 & Compute only $m \ge 0$;
-  reconstruct $m < 0$ algebraically \\
-$E_\theta = 0$ detection & $2\times$ on Step~2
-  & Skip the two $\theta$-component FFTLog calls when $E_{m,\theta} \equiv 0$ \\
-Neumann shift (LPA fields) & ${\sim}M_{\max}\times$ on Step~2
-  & Replace $M_{\max}$ FFTLog calls by 1 call $+$ interpolation $+$ FFT \\
-Bessel truncation in Graf shift & ${\sim}4\times$ on Step~4
-  & Truncate sum at $|m| \le \min(M_{\max},\,\lceil k_r x_0\rceil + 20)$ \\
-Miller backward recurrence & ${\sim}10\times$ on Bessel evaluation
-  & Compute $J_0(x),\ldots,J_{M}(x)$ in one $O(M)$ pass \\
-SIMD vectorization & $2$--$4\times$ on Step~4 inner loop
-  & The dot product $\sum_m \tilde A_{m+l} J_m$ is SIMD-friendly \\
-Shared-memory threading & ${\sim}N_{\mathrm{threads}}\times$
-  & Steps 2, 4, 5, 6 are embarrassingly parallel \\
+Negative-$m$ symmetry
+  & $2\times$ on Step~2
+  & Compute only $m \ge 0$; reconstruct $m < 0$ algebraically
+    via~\eqref{eq:Atilde_neg_y}/\eqref{eq:Atilde_neg_x}. \\[6pt]
+$E_\theta = 0$ detection
+  & $2\times$ on Step~2
+  & When $E_{m,\theta} \equiv 0$ (common for scalar-like fields),
+    the two $\theta$-component FFTLog calls can be skipped entirely,
+    reducing Step~2 from 4 to 2 FFTLog calls per mode. \\[6pt]
+Neumann shift (LPA fields)
+  & ${\sim}M_{\max}\times$ on Step~2
+  & For fields of the form $t(r)\,e^{ik_x r\cos\theta}$, replace
+    all $M_{\max}$ per-mode FFTLog calls by a single order-0 call
+    followed by interpolation and FFT at each $k_r$
+    (\S\ref{sec:neumann}). \\[6pt]
+Bessel truncation in Graf shift
+  & ${\sim}4\times$ on Step~4
+  & $J_m(k_r x_0)$ decays exponentially for $|m| > k_r x_0$.
+    Truncate the inner sum at
+    $|m| \le \min(M_{\max},\,\lceil k_r x_0\rceil + 20)$. \\[6pt]
+Miller backward recurrence
+  & ${\sim}10\times$ on Bessel eval
+  & Compute $J_0(x), J_1(x), \ldots, J_{M_{\max}}(x)$ in a single
+    $O(M_{\max})$ backward-recurrence pass, normalised against
+    $J_0(x)$.  Use $J_{-m}(x) = (-1)^m J_m(x)$ for negative
+    orders. \\[6pt]
+SIMD vectorization
+  & $2$--$4\times$ on Step~4
+  & The inner loop $\sum_m \tilde A_{m+l}\,J_m$ is a dot product
+    over contiguous memory and should be marked for SIMD
+    auto-vectorization. \\[6pt]
+Shared-memory threading
+  & ${\sim}N_{\mathrm{threads}}\times$
+  & Steps 2, 4, 5, and 6 are embarrassingly parallel (over modes,
+    $k_r$ points, local modes, and $\rho$ points respectively).
+    Shared-memory threads avoid serialization overhead. \\
 \bottomrule
 \end{tabular}
 \end{center}
