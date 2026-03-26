@@ -35,11 +35,16 @@ kr = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
 
 using LinearAlgebra: dot
 
-# Helper: compare FFTLog output to reference, only where reference is significant.
-# Returns (max_relative_error, scale_factor).
-function compare_significant(result, reference; threshold=1e-6)
-    peak = maximum(abs.(reference))
-    sig  = findall(abs.(reference) .> threshold * peak)
+# Helper: compare FFTLog output to reference in the grid INTERIOR
+# (skip boundary 15% on each side where circular convolution aliases).
+# Only checks points where reference exceeds threshold × peak.
+function compare_significant(result, reference; threshold=1e-4, bnd_frac=0.15)
+    N  = length(result)
+    lo = round(Int, N * bnd_frac) + 1
+    hi = round(Int, N * (1 - bnd_frac))
+    interior = lo:hi
+    peak = maximum(abs.(reference[interior]))
+    sig  = [i for i in interior if abs(reference[i]) > threshold * peak]
     if isempty(sig)
         return 0.0, 1.0
     end
@@ -62,7 +67,7 @@ ref1  = exp.(-kr.^2 ./ 2)
 err1, sc1 = compare_significant(A1, ref1)
 println("  Scale factor: $(round(sc1, sigdigits=6))")
 println("  Max relative error (mid region): $(round(err1, sigdigits=3))")
-@assert err1 < 0.1 "Gaussian Hankel pair failed"
+@assert err1 < 0.01 "Gaussian Hankel pair failed"
 println("  PASSED ✓")
 
 
@@ -78,7 +83,7 @@ ref2 = kr .* exp.(-kr.^2 ./ 2)
 err2, sc2 = compare_significant(A2, ref2)
 println("  Scale factor: $(round(sc2, sigdigits=6))")
 println("  Max relative error (mid region): $(round(err2, sigdigits=3))")
-@assert err2 < 0.1 "Order-1 Gaussian pair failed"
+@assert err2 < 0.01 "Order-1 Gaussian pair failed"
 println("  PASSED ✓")
 
 
@@ -99,7 +104,7 @@ for kval in test_kvalues
     println("  k=$(round(kval, sigdigits=3)): err=$(round(err, sigdigits=3))")
 end
 println("  Max relative error: $(round(max_err_3, sigdigits=3))")
-@assert max_err_3 < 0.1 "QuadGK reference test failed for order 0"
+@assert max_err_3 < 0.02 "QuadGK reference test failed for order 0"
 println("  PASSED ✓")
 
 
@@ -119,7 +124,7 @@ for kval in [0.3, 1.0, 3.0]
     end
 end
 println("  Max relative error: $(round(max_err_4, sigdigits=3))")
-@assert max_err_4 < 0.1 "QuadGK reference test failed for order 5"
+@assert max_err_4 < 0.05 "QuadGK reference test failed for order 5"
 println("  PASSED ✓")
 
 
