@@ -137,7 +137,7 @@ max_err_5 = 0.0
 for (idx, m) in enumerate(m_pos_5)
     expected = (im)^m * besselj(m, a_val)
     err = maximum(abs.(Em_r_5[:, idx] .- expected))
-    max_err_5 = max(max_err_5, err)
+    global max_err_5 = max(max_err_5, err)
 end
 println("  Max mode error over m=0..$M_max_5: $(round(max_err_5, sigdigits=3))")
 @assert max_err_5 < 1e-10 "Jacobi-Anger decomposition failed"
@@ -159,8 +159,8 @@ for (idx, m) in enumerate(m_pos_6)
     for jr in 1:Nr
         manual_r = sum(Er_6[jr, jt] * exp(-im * m * theta[jt]) for jt in 1:Ntheta) / Ntheta
         manual_t = sum(Et_6[jr, jt] * exp(-im * m * theta[jt]) for jt in 1:Ntheta) / Ntheta
-        max_err_6 = max(max_err_6, abs(Em_r_6[jr, idx] - manual_r))
-        max_err_6 = max(max_err_6, abs(Em_t_6[jr, idx] - manual_t))
+        global max_err_6 = max(max_err_6, abs(Em_r_6[jr, idx] - manual_r))
+        global max_err_6 = max(max_err_6, abs(Em_t_6[jr, idx] - manual_t))
     end
 end
 println("  Max error vs manual DFT: $(round(max_err_6, sigdigits=3))")
@@ -237,7 +237,7 @@ try
     angular_decompose(Er_10, Et_10, 5)  # needs 2*5+1=11 but only have 8
 catch e
     if isa(e, AssertionError)
-        caught = true
+        global caught = true
         println("  Correctly caught: $(e.msg)")
     end
 end
@@ -267,8 +267,8 @@ for (idx, m) in enumerate(m_pos_11)
         c2 = (im)^(m+1)
         exp_r = (c1 * Jmm1 - c2 * Jmp1) / (2im)
         exp_t = (c1 * Jmm1 + c2 * Jmp1) / 2
-        max_err_11 = max(max_err_11, abs(Em_r_11[jr, idx] - exp_r))
-        max_err_11 = max(max_err_11, abs(Em_t_11[jr, idx] - exp_t))
+        global max_err_11 = max(max_err_11, abs(Em_r_11[jr, idx] - exp_r))
+        global max_err_11 = max(max_err_11, abs(Em_t_11[jr, idx] - exp_t))
     end
 end
 println("  Max error vs analytical (m=0..$M_11): $(round(max_err_11, sigdigits=3))")
@@ -290,7 +290,7 @@ for m in 1:M_11
     err_r = maximum(abs.(full_r[:, idx_neg] .+ full_r[:, idx_pos]))
     # E_{-m,θ} should equal +E_{m,θ}
     err_t = maximum(abs.(full_t[:, idx_neg] .- full_t[:, idx_pos]))
-    max_err_12 = max(max_err_12, err_r, err_t)
+    global max_err_12 = max(max_err_12, err_r, err_t)
 end
 println("  Max symmetry error (m=1..$M_11): $(round(max_err_12, sigdigits=3))")
 @assert max_err_12 < 1e-10 "y-pol symmetry violated"
