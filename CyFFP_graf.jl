@@ -38,7 +38,7 @@ export cyfft_farfield,
 
 # ═══════════════════════════════════════════════════════════════
 # §1  FFTLog Hankel Transform
-#     H_ν[f](k) = ∫₀^∞ J_ν(kr) f(r) r dr
+#     H_ν[f](k) = ∫₀^∞ J_ν(kr) f(r) dr
 #     via log-variable change → convolution → FFT
 #     Filter kernel U(q) = Γ((ν+1+q)/2)/Γ((ν+1-q)/2) * 2^q
 #     evaluated via loggamma for stability at any |ν|.
@@ -47,17 +47,21 @@ export cyfft_farfield,
 """
     fftlog_hankel(f_r, dln, nu) -> A_kr
 
-Compute the order-ν Hankel transform of `f_r` sampled on a log-spaced grid
+Compute the order-ν Hankel transform H_ν[f](k) = ∫₀^∞ f(r) J_ν(kr) dr
+of `f_r` sampled on a log-spaced grid
     r[j] = r0 * exp(j * dln),  j = 0, 1, ..., N-1.
 Returns the transform A on the reciprocal log-grid
     kr[j] = exp(-log(r[end])) * exp(j * dln).
+
+Note: this uses the plain dr measure.  Call sites that need the
+r dr measure (e.g. inverse Hankel) pre-multiply the integrand by r or kr.
 
 Stable for any real ν, including |ν| ~ 600.
 """
 function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     N  = length(f_r)
-    # FFTW-ordered frequency indices: 0,1,...,N/2-1,-N/2,...,-1
-    n_idx = [0:N÷2-1; -N÷2:-1]
+    # FFTW-ordered frequency indices: 0,1,...,floor((N-1)/2),-floor(N/2),...,-1
+    n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
     q     = @. (2π / (N * dln)) * n_idx   # continuous Fourier variable
 
     # Filter kernel U_ν(q) computed in log-space for |ν| >> 1 stability
@@ -68,7 +72,7 @@ function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     end
 
     F = fft(complex.(f_r))
-    return real.(ifft(F .* U_c))
+    return ifft(F .* U_c)
 end
 
 
@@ -180,8 +184,8 @@ function propagate_modes(A_TE::Matrix{ComplexF64},
                           k::Float64, f::Float64)
     kz   = @. sqrt(complex(k^2 - kr_grid^2))
     prop = @. ifelse(kr_grid < k, exp(im * real(kz) * f), zero(ComplexF64))
-    # prop is [Nkr]; broadcast over modes (columns)
-    return (A_TE .+ A_TM) .* prop
+    # prop is [Nkr]; reshape to column for correct broadcast over modes (columns)
+    return (A_TE .+ A_TM) .* reshape(prop, :, 1)
 end
 
 
@@ -396,12 +400,21 @@ function cyfft_farfield(Er::Matrix{ComplexF64},
     M_max = ceil(Int, k * sin(alpha) * R) + M_buffer
 
     # Local mode count: enough to represent PSF out to a few Airy radii
-    # L_max ~ k * NA * rho_max; default rho_max ~ 10 lambda
+    # L_max ~ k * NA * rho_max; default rho_max ~ 5 lambda
+    lambda   = 2π / k
+    rho_max_ = 5.0 * lambda
     if isnothing(L_max)
         NA    = sin(alpha)  # crude NA estimate; user can override
         NA    = max(NA, 0.1)
-        L_max = ceil(Int, k * NA * 10.0 / (2π)) + 5
+        L_max = ceil(Int, k * NA * rho_max_) + 5
         L_max = max(L_max, 5)
+    end
+
+    # Graf's addition theorem converges only for ρ < x0
+    if x0 > 0 && R > x0
+        @warn "Output rho_grid extends beyond x0 = f·tan(α) = $(round(x0, sigdigits=4)). " *
+              "Graf's addition theorem converges only for ρ < x0. " *
+              "Results at large ρ may be inaccurate."
     end
 
     # ── Step 1: Angular decomposition ──────────────────────────────
