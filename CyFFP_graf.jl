@@ -392,6 +392,14 @@ Full near-to-far-field transform using the Graf-shift approach.
 Exploits the E_{-m} = σ̂ E_m symmetry to halve the number of
 Hankel transforms (only m ≥ 0 computed).
 
+**Symmetry assumption:** The input field must arise from x-polarized
+illumination (φ=0) of an axisymmetric structure, so that
+E_{-m,r} = E_{m,r} and E_{-m,θ} = -E_{m,θ} (cyFFP0 Eqs. 65–66).
+This holds for ideal lenses, axisymmetric metalenses under LPA, and
+any rotationally symmetric scatterer.  For other polarizations or
+non-axisymmetric structures, the symmetry does not hold and results
+will be incorrect.
+
 # Arguments
 - `Er`, `Etheta` : complex [Nr × Ntheta] near-field (cylindrical components)
 - `r`            : log-spaced radial grid.  Must satisfy r[j+1]/r[j] = const.
