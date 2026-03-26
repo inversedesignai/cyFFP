@@ -11,6 +11,7 @@
       5. Oblique incidence: PSF centered at ρ=0 in local frame
       6. cyfft_farfield_modal matches cyfft_farfield
       7. Convergence with L_max
+      8. Analytical Jacobi-Anger modal decomposition
 """
 
 include("CyFFP_graf.jl")
@@ -194,8 +195,45 @@ println("  Full  peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
 @assert abs(rho_pk3 - rho_pk2) < 0.01 * lambda "Modal and full-field peaks disagree"
 println("  PASSED ✓")
 
-# ─── Test 7: Graf convergence vs L_max ──────────────────────────
-println("\n--- Test 7: Convergence with L_max ---")
+# ─── Test 8: Analytical Jacobi-Anger modal decomposition ─────────
+println("\n--- Test 8: Analytical modal input (Jacobi-Anger) ---")
+# For u(r) exp(i k_x r cos θ) (cos θ r̂ − sin θ θ̂), the angular modes are:
+#   E_{m,r}(r)  = u(r)/2 [i^{m-1} J_{m-1}(k_x r) + i^{m+1} J_{m+1}(k_x r)]
+#   E_{m,θ}(r)  = u(r)·i/2 [i^{m-1} J_{m-1}(k_x r) − i^{m+1} J_{m+1}(k_x r)]
+# No FFT over θ needed.
+alpha_a  = deg2rad(11.0)
+k_x      = k * sin(alpha_a)
+M_max_a  = ceil(Int, k_x * R) + 5
+u_lens(rv) = lens_phase(rv)   # ideal lens transmission
+
+Em_r_a   = zeros(ComplexF64, Nr, M_max_a + 1)
+Em_th_a  = zeros(ComplexF64, Nr, M_max_a + 1)
+rv       = collect(r)
+
+for (idx, m) in enumerate(0:M_max_a)
+    Jmm1 = besselj.(m - 1, k_x .* rv)
+    Jmp1 = besselj.(m + 1, k_x .* rv)
+    c1   = (im)^(m - 1)
+    c2   = (im)^(m + 1)
+    Em_r_a[:, idx]  .= u_lens.(rv) ./ 2 .* (c1 .* Jmm1 .+ c2 .* Jmp1)
+    Em_th_a[:, idx] .= u_lens.(rv) .* im ./ 2 .* (c1 .* Jmm1 .- c2 .* Jmp1)
+end
+
+psf_a, rho_a, psi_a = cyfft_farfield_modal(
+    Em_r_a, Em_th_a, rv, k, alpha_a, f;
+    L_max=12, Npsi=64)
+
+I_a     = abs2.(psf_a)
+peak_a  = argmax(I_a)
+rho_pka = rho_a[peak_a[1]]
+println("  Analytical modal PSF peak at ρ = $(round(rho_pka/lambda, digits=4)) λ")
+# Should match the FFT-decomposed oblique test (Test 5)
+println("  FFT-decomposed  PSF peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
+@assert abs(rho_pka - rho_pk2) < 0.1 * lambda "Analytical and FFT-based modal peaks disagree"
+println("  PASSED ✓")
+
+# ─── Test 9: Graf convergence vs L_max ──────────────────────────
+println("\n--- Test 9: Convergence with L_max ---")
 println("  (Peak intensity vs L_max for alpha=11° lens)")
 for Lm in [2, 5, 10, 15, 20]
     psf_l, _, _ = cyfft_farfield(
