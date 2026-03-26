@@ -141,7 +141,16 @@ function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     end
 
     F = fft(complex.(f_r))
-    return ifft(F .* U_c)
+    A = ifft(F .* U_c)
+
+    # The output must be reversed: the "natural" FFTLog output grid starts
+    # at 1/r_min (huge), and reversing maps it to the useful grid
+    # kr[j] = (1/r_max) exp(j Δln), matching the dev convention.
+    #
+    # IMPORTANT: the mcfit-convention kernel K(t) = t J_ν(t) introduces an
+    # extra factor of kr in the output.  The raw output is kr × H_ν[f](kr).
+    # The caller must divide by kr to obtain the pure Hankel transform.
+    return reverse(A)
 end
 
 end  # module CyFFP
