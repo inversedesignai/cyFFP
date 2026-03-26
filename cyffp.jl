@@ -11,7 +11,7 @@ module CyFFP
 using FFTW
 using SpecialFunctions: loggamma
 
-export angular_decompose, fftlog_hankel
+export angular_decompose, fftlog_hankel, compute_TE_TM_coeffs
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -116,6 +116,14 @@ measure, pre-multiply the input by `r`.
 - `nu`   : Bessel order (any real number)
 """
 function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
+    # Handle negative integer orders via J_{-n}(x) = (-1)^n J_n(x).
+    # This avoids Gamma-function poles at non-positive integer arguments.
+    if nu < 0 && nu == round(nu)
+        n = round(Int, -nu)
+        sign = iseven(n) ? 1 : -1
+        return sign .* fftlog_hankel(f_r, dln, Float64(n))
+    end
+
     N = length(f_r)
 
     # FFTW-ordered frequency indices: 0,1,...,⌊(N-1)/2⌋, -⌊N/2⌋,...,-1
@@ -151,6 +159,97 @@ function fftlog_hankel(f_r::AbstractVector, dln::Real, nu::Real)
     # extra factor of kr in the output.  The raw output is kr × H_ν[f](kr).
     # The caller must divide by kr to obtain the pure Hankel transform.
     return reverse(A)
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 2 (part 2) — TE and TM Expansion Coefficients
+#
+# From the tex formulation (§4–§5), the TE/TM coefficients are:
+#
+#  A^TE_m(kr) = (i/2)[H_{m+1}[rE_r] + H_{m-1}[rE_r]]
+#             + (1/2)[H_{m-1}[rE_θ] − H_{m+1}[rE_θ]]
+#
+#  A^TM_m(kr) = −(kz/k)/2 [H_{m-1}[rE_r] − H_{m+1}[rE_r]]
+#             − i(kz/k)/2 [H_{m-1}[rE_θ] + H_{m+1}[rE_θ]]
+#
+# where H_ν[f](kr) = ∫₀^∞ f(r) J_ν(kr r) dr.
+#
+# Each mode m requires 4 FFTLog calls (2 if E_θ ≡ 0).
+# Only m ≥ 0 modes are computed; negative modes use symmetry later.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    compute_TE_TM_coeffs(Em_r, Em_theta, m_pos, r, k)
+    -> (A_TE, A_TM, kr_grid)
+
+Compute TE and TM expansion coefficients for modes m = 0,...,M_max.
+
+# Arguments
+- `Em_r[Nr, M_max+1]`    : r-component modal amplitudes
+- `Em_theta[Nr, M_max+1]`: θ-component modal amplitudes
+- `m_pos`                 : mode indices [0, 1, ..., M_max]
+- `r`                     : log-spaced radial grid (Vector{Float64})
+- `k`                     : wavenumber 2π/λ
+
+# Returns
+- `A_TE[Nr, M_max+1]`  : TE coefficients on the kr grid
+- `A_TM[Nr, M_max+1]`  : TM coefficients on the kr grid
+- `kr_grid[Nr]`         : reciprocal log-grid from FFTLog
+"""
+function compute_TE_TM_coeffs(Em_r::Matrix{ComplexF64},
+                               Em_theta::Matrix{ComplexF64},
+                               m_pos::Vector{Int},
+                               r::Vector{Float64},
+                               k::Float64)
+    Nr      = length(r)
+    N_modes = length(m_pos)
+    dln     = log(r[2] / r[1])
+
+    # Output kr grid (reciprocal log-grid, same as FFTLog output)
+    kr_grid = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
+
+    # kz/k at each kr point: real for propagating, 0 for evanescent
+    kz_over_k = @. sqrt(max(1.0 - (kr_grid / k)^2, 0.0))
+
+    # Detect E_theta ≡ 0 → skip 2 FFTLog calls per mode
+    etheta_zero = iszero(Em_theta)
+
+    A_TE = zeros(ComplexF64, Nr, N_modes)
+    A_TM = zeros(ComplexF64, Nr, N_modes)
+
+    # Warm FFTW plan cache (thread-safety)
+    fftlog_hankel(zeros(ComplexF64, Nr), dln, 0.0)
+
+    Threads.@threads for idx in 1:N_modes
+        m  = m_pos[idx]
+        fr = r .* Em_r[:, idx]      # r × E_{m,r} — integrand for Hankel
+
+        # FFTLog returns kr × H_ν[f](kr).  We collect the raw (kr×H) values
+        # and divide by kr once at the end.
+        raw_mp1_r = fftlog_hankel(fr, dln, Float64(m + 1))  # kr × H_{m+1}[r E_r]
+        raw_mm1_r = fftlog_hankel(fr, dln, Float64(m - 1))  # kr × H_{m-1}[r E_r]
+
+        if etheta_zero
+            # A^TE = (i/2)(H_{m+1} + H_{m-1})[r E_r]  (θ-terms vanish)
+            # A^TM = -(kz/k)/2 (H_{m-1} - H_{m+1})[r E_r]
+            A_TE[:, idx] .= (im/2) .* (raw_mp1_r .+ raw_mm1_r) ./ kr_grid
+            A_TM[:, idx] .= -(kz_over_k ./ 2) .* (raw_mm1_r .- raw_mp1_r) ./ kr_grid
+        else
+            fth = r .* Em_theta[:, idx]  # r × E_{m,θ}
+
+            raw_mm1_th = fftlog_hankel(fth, dln, Float64(m - 1))
+            raw_mp1_th = fftlog_hankel(fth, dln, Float64(m + 1))
+
+            A_TE[:, idx] .= ((im/2) .* (raw_mp1_r .+ raw_mm1_r) .+
+                             (1.0/2) .* (raw_mm1_th .- raw_mp1_th)) ./ kr_grid
+
+            A_TM[:, idx] .= (-(kz_over_k ./ 2) .* (raw_mm1_r .- raw_mp1_r) .-
+                             im .* (kz_over_k ./ 2) .* (raw_mm1_th .+ raw_mp1_th)) ./ kr_grid
+        end
+    end
+
+    return A_TE, A_TM, kr_grid
 end
 
 end  # module CyFFP
