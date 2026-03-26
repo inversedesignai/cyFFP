@@ -1,17 +1,29 @@
 """
     CyFFP — Cylindrical Far-Field Propagation
     ==========================================
-    Near-to-far-field transform via Vector Cylindrical Harmonics.
+    Scalar near-to-far-field transform via cylindrical harmonics.
 
-    This module is built incrementally; each step of the pipeline
-    is added, tested, and validated before proceeding to the next.
+    For a linearly polarized field E = u(r,θ) p̂, the Cartesian component
+    along p̂ satisfies the scalar wave equation exactly.  The pipeline
+    propagates this scalar u through:
+      1. Angular FFT → modes u_m(r)
+      2. Scalar Hankel transform → spectral coefficients a_m(kr)
+      3. Propagation → ã_m(kr) = a_m(kr) e^{ikz f}
+      4. Graf shift → local modes B_l(kr)
+      5. Inverse Hankel → b_l(ρ)
+      6. Angular synthesis → PSF u(ρ,ψ)
+
+    The TE/TM decomposition is NOT used for the scalar PSF — it conflates
+    different Bessel structures and gives incorrect results when naively
+    combined as Ã = A^TE + A^TM.
 """
 module CyFFP
 
 using FFTW
 using SpecialFunctions: loggamma, besselj
 
-export angular_decompose, fftlog_hankel, compute_TE_TM_coeffs, propagate_and_symmetrize,
+export angular_decompose, fftlog_hankel,
+       compute_scalar_coeffs, propagate_scalar,
        graf_shift
 
 # ═══════════════════════════════════════════════════════════════
@@ -164,166 +176,113 @@ end
 
 
 # ═══════════════════════════════════════════════════════════════
-# Step 2 (part 2) — TE and TM Expansion Coefficients
+# Step 2 — Scalar Spectral Coefficients
 #
-# From the tex formulation (§4–§5), the TE/TM coefficients are:
+# For a scalar field u(r,θ) = Σ_m u_m(r) e^{imθ}, the spectral
+# coefficient in the cylindrical harmonic expansion is:
 #
-#  A^TE_m(kr) = (i/2)[H_{m+1}[rE_r] + H_{m-1}[rE_r]]
-#             + (1/2)[H_{m-1}[rE_θ] − H_{m+1}[rE_θ]]
+#   a_m(kr) = ∫₀^∞ u_m(r) J_m(kr r) r dr = H_m[r u_m](kr)
 #
-#  A^TM_m(kr) = −(kz/k)/2 [H_{m-1}[rE_r] − H_{m+1}[rE_r]]
-#             − i(kz/k)/2 [H_{m-1}[rE_θ] + H_{m+1}[rE_θ]]
+# This is a SINGLE Hankel transform at order m — much simpler and
+# more correct than the TE/TM approach which uses 4 transforms at
+# orders m±1 and conflates different Bessel structures.
 #
-# where H_ν[f](kr) = ∫₀^∞ f(r) J_ν(kr r) dr.
-#
-# Each mode m requires 4 FFTLog calls (2 if E_θ ≡ 0).
-# Only m ≥ 0 modes are computed; negative modes use symmetry later.
+# For linearly polarized light E = u(r,θ) p̂, the Cartesian component
+# along p̂ is exactly the scalar field u, so this gives the correct PSF.
 # ═══════════════════════════════════════════════════════════════
 
 """
-    compute_TE_TM_coeffs(Em_r, Em_theta, m_pos, r, k)
-    -> (A_TE, A_TM, kr_grid)
+    compute_scalar_coeffs(u_m, m_pos, r) -> (a_m, kr_grid)
 
-Compute TE and TM expansion coefficients for modes m = 0,...,M_max.
+Compute scalar spectral coefficients a_m(kr) = H_m[r u_m](kr) for
+modes m = 0, ..., M_max.  One FFTLog call per mode at order m.
 
 # Arguments
-- `Em_r[Nr, M_max+1]`    : r-component modal amplitudes
-- `Em_theta[Nr, M_max+1]`: θ-component modal amplitudes
-- `m_pos`                 : mode indices [0, 1, ..., M_max]
-- `r`                     : log-spaced radial grid (Vector{Float64})
-- `k`                     : wavenumber 2π/λ
+- `u_m[Nr, M_max+1]` : scalar modal amplitudes u_m(r)
+- `m_pos`             : mode indices [0, 1, ..., M_max]
+- `r`                 : log-spaced radial grid
 
 # Returns
-- `A_TE[Nr, M_max+1]`  : TE coefficients on the kr grid
-- `A_TM[Nr, M_max+1]`  : TM coefficients on the kr grid
-- `kr_grid[Nr]`         : reciprocal log-grid from FFTLog
+- `a_m[Nr, M_max+1]` : spectral coefficients on the kr grid
+- `kr_grid[Nr]`       : reciprocal log-grid from FFTLog
 """
-function compute_TE_TM_coeffs(Em_r::Matrix{ComplexF64},
-                               Em_theta::Matrix{ComplexF64},
-                               m_pos::Vector{Int},
-                               r::Vector{Float64},
-                               k::Float64)
+function compute_scalar_coeffs(u_m::Matrix{ComplexF64},
+                                m_pos::Vector{Int},
+                                r::Vector{Float64})
     Nr      = length(r)
     N_modes = length(m_pos)
     dln     = log(r[2] / r[1])
 
-    # Output kr grid (reciprocal log-grid, same as FFTLog output)
     kr_grid = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
 
-    # kz/k at each kr point: real for propagating, 0 for evanescent
-    kz_over_k = @. sqrt(max(1.0 - (kr_grid / k)^2, 0.0))
-
-    # Detect E_theta ≡ 0 → skip 2 FFTLog calls per mode
-    etheta_zero = iszero(Em_theta)
-
-    A_TE = zeros(ComplexF64, Nr, N_modes)
-    A_TM = zeros(ComplexF64, Nr, N_modes)
+    a_m = zeros(ComplexF64, Nr, N_modes)
 
     # Warm FFTW plan cache (thread-safety)
     fftlog_hankel(zeros(ComplexF64, Nr), dln, 0.0)
 
     Threads.@threads for idx in 1:N_modes
-        m  = m_pos[idx]
-        fr = r .* Em_r[:, idx]      # r × E_{m,r} — integrand for Hankel
+        m   = m_pos[idx]
+        g   = r .* u_m[:, idx]    # r × u_m — Hankel integrand with r dr measure
 
-        # FFTLog returns kr × H_ν[f](kr).  We collect the raw (kr×H) values
-        # and divide by kr once at the end.
-        raw_mp1_r = fftlog_hankel(fr, dln, Float64(m + 1))  # kr × H_{m+1}[r E_r]
-        raw_mm1_r = fftlog_hankel(fr, dln, Float64(m - 1))  # kr × H_{m-1}[r E_r]
-
-        if etheta_zero
-            # A^TE = (i/2)(H_{m+1} + H_{m-1})[r E_r]  (θ-terms vanish)
-            # A^TM = -(kz/k)/2 (H_{m-1} - H_{m+1})[r E_r]
-            A_TE[:, idx] .= (im/2) .* (raw_mp1_r .+ raw_mm1_r) ./ kr_grid
-            A_TM[:, idx] .= -(kz_over_k ./ 2) .* (raw_mm1_r .- raw_mp1_r) ./ kr_grid
-        else
-            fth = r .* Em_theta[:, idx]  # r × E_{m,θ}
-
-            raw_mm1_th = fftlog_hankel(fth, dln, Float64(m - 1))
-            raw_mp1_th = fftlog_hankel(fth, dln, Float64(m + 1))
-
-            A_TE[:, idx] .= ((im/2) .* (raw_mp1_r .+ raw_mm1_r) .+
-                             (1.0/2) .* (raw_mm1_th .- raw_mp1_th)) ./ kr_grid
-
-            A_TM[:, idx] .= (-(kz_over_k ./ 2) .* (raw_mm1_r .- raw_mp1_r) .-
-                             im .* (kz_over_k ./ 2) .* (raw_mm1_th .+ raw_mp1_th)) ./ kr_grid
-        end
+        # FFTLog returns kr × H_m[g](kr).  Divide by kr to get a_m.
+        raw = fftlog_hankel(g, dln, Float64(m))
+        a_m[:, idx] .= raw ./ kr_grid
     end
 
-    return A_TE, A_TM, kr_grid
+    return a_m, kr_grid
 end
 
 
 # ═══════════════════════════════════════════════════════════════
-# Step 3 — Propagation + Negative-m Symmetry Reconstruction
+# Step 3 — Propagation + Symmetry Reconstruction (Scalar)
 #
 # Propagation:
-#   Ã_m(kr) = [A^TE_m(kr) + A^TM_m(kr)] · exp(ikz f)
+#   ã_m(kr) = a_m(kr) · exp(ikz f)
 #   kz = √(k² - kr²),  zeroed for kr > k (evanescent).
 #
-# Symmetry (from §6 of the tex, E_{-m} = σ̂ E_m):
-#   y-pol: Ã_{-m} = (-1)^m (A^TE_m − A^TM_m) · exp(ikz f)
-#   x-pol: Ã_{-m} = (-1)^m (A^TM_m − A^TE_m) · exp(ikz f)
-#
-# Input:  A_TE, A_TM  [Nkr × (M_max+1)]  for m = 0,...,M_max
-# Output: A_tilde     [Nkr × (2M_max+1)]  for m = -M_max,...,M_max
-#         m_full = [-M_max, ..., -1, 0, 1, ..., M_max]
-#         Column index j corresponds to mode m = j - M_max - 1
+# Symmetry: for a field with u(r,-θ) = u(r,θ) (any linearly
+# polarized illumination of an axisymmetric structure with oblique
+# tilt in the xz-plane), we have u_{-m} = u_m, hence ã_{-m} = ã_m.
+# No sign change, no TE/TM distinction.
 # ═══════════════════════════════════════════════════════════════
 
 """
-    propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f; polarization=:y)
-    -> (A_tilde, m_full)
+    propagate_scalar(a_m, m_pos, kr_grid, k, f) -> (a_tilde, m_full)
 
-Combine TE+TM, apply propagation phase exp(ikz f), and reconstruct
-negative-m modes via symmetry.
+Apply propagation phase and reconstruct negative-m modes via symmetry.
 
-Returns A_tilde[Nkr, 2M_max+1] for m = -M_max:M_max.
-Column j corresponds to mode m = j - M_max - 1.
-
-`polarization` selects the symmetry sign:
-- `:y` (s-pol, default): Ã_{-m} = (-1)^m (A^TE - A^TM) · prop
-- `:x` (p-pol):          Ã_{-m} = (-1)^m (A^TM - A^TE) · prop
+Returns a_tilde[Nkr, 2M_max+1] for m = -M_max:M_max.
+For a symmetric scalar field: ã_{-m} = ã_m (no sign change).
 """
-function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
-                                   A_TM::Matrix{ComplexF64},
-                                   m_pos::Vector{Int},
-                                   kr_grid::Vector{Float64},
-                                   k::Float64, f::Float64;
-                                   polarization::Symbol = :y)
-    @assert polarization in (:x, :y) "polarization must be :x or :y"
+function propagate_scalar(a_m::Matrix{ComplexF64},
+                           m_pos::Vector{Int},
+                           kr_grid::Vector{Float64},
+                           k::Float64, f::Float64)
     M_max = m_pos[end]
     Nkr   = length(kr_grid)
 
-    # Propagation phase: exp(ikz f) for propagating, 0 for evanescent
     kz   = @. sqrt(complex(k^2 - kr_grid^2))
     prop = @. ifelse(kr_grid < k, exp(im * real(kz) * f), zero(ComplexF64))
 
     N_full  = 2M_max + 1
-    A_tilde = zeros(ComplexF64, Nkr, N_full)
+    a_tilde = zeros(ComplexF64, Nkr, N_full)
     m_full  = collect(-M_max:M_max)
 
     for (ip, m) in enumerate(m_pos)
-        ate = @view A_TE[:, ip]
-        atm = @view A_TM[:, ip]
+        coeff = @view a_m[:, ip]
+        propagated = coeff .* prop
 
-        # Positive mode: Ã_m = (A^TE_m + A^TM_m) · prop
         idx_pos = m + M_max + 1
-        A_tilde[:, idx_pos] .= (ate .+ atm) .* prop
+        a_tilde[:, idx_pos] .= propagated
 
-        # Negative mode via symmetry
+        # Scalar symmetry: ã_{-m} = ã_m
         if m > 0
             idx_neg = -m + M_max + 1
-            s = iseven(m) ? 1.0 : -1.0   # (-1)^m
-            if polarization == :y
-                A_tilde[:, idx_neg] .= s .* (ate .- atm) .* prop
-            else  # :x
-                A_tilde[:, idx_neg] .= s .* (atm .- ate) .* prop
-            end
+            a_tilde[:, idx_neg] .= propagated
         end
     end
 
-    return A_tilde, m_full
+    return a_tilde, m_full
 end
 
 
