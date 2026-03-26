@@ -361,17 +361,26 @@ println("\n  13b: y-pol symmetry (from full FFT)")
 full_r_13 = fft(Er_13, 2) ./ Ntheta_13
 full_t_13 = fft(Et_13, 2) ./ Ntheta_13
 
+# Only check modes with significant amplitude (skip Bessel tail where
+# amplitudes are near machine precision and relative error blows up).
+peak_amp = max(maximum(abs.(full_r_13)), maximum(abs.(full_t_13)))
 max_err_13b = 0.0
-for m in 1:min(M_max_13, 50)  # check first 50 modes
+modes_checked = 0
+for m in 1:min(M_max_13, 50)
     idx_pos = m + 1
     idx_neg = mod(-m, Ntheta_13) + 1
+    amp = max(maximum(abs.(full_r_13[:, idx_pos])),
+              maximum(abs.(full_t_13[:, idx_pos])))
+    if amp < 1e-10 * peak_amp
+        continue   # skip modes in the noise floor
+    end
     err_r = maximum(abs.(full_r_13[:, idx_neg] .+ full_r_13[:, idx_pos]))  # should be -E_{m,r}
     err_t = maximum(abs.(full_t_13[:, idx_neg] .- full_t_13[:, idx_pos]))  # should be +E_{m,θ}
-    nrm   = max(maximum(abs.(full_r_13[:, idx_pos])),
-                maximum(abs.(full_t_13[:, idx_pos])), 1e-30)
-    global max_err_13b = max(max_err_13b, err_r / nrm, err_t / nrm)
+    global max_err_13b = max(max_err_13b, err_r / amp, err_t / amp)
+    global modes_checked += 1
 end
-println("    Max relative symmetry error (m=1..$(min(M_max_13,50))): $(round(max_err_13b, sigdigits=3))")
+println("    Modes checked: $modes_checked (above noise floor)")
+println("    Max relative symmetry error: $(round(max_err_13b, sigdigits=3))")
 @assert max_err_13b < 1e-10 "y-pol symmetry violated for ideal oblique lens"
 println("    PASSED ✓")
 
