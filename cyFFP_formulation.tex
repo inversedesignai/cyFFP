@@ -685,39 +685,52 @@ This is a convolution $A = g * K_\nu$, so in Fourier space:
 The Mellin transform of $J_\nu(x)$ is
 $\mathcal{M}[J_\nu](s) = 2^{s-1}\,\Gamma\!\bigl(\tfrac{\nu+s}{2}\bigr)
 \big/\Gamma\!\bigl(\tfrac{\nu+2-s}{2}\bigr)$.
-With $x = e^\tau$ and the FFTW convention
-$\hat K(q) = \int K(\tau)\,e^{-iq\tau}\,d\tau$ (corresponding to $s = 1 - iq$):
+With $x = e^\tau$ and the Mellin variable $s = 1 + iq$ (corresponding to the
+kernel $K(t) = t\,J_\nu(t)$ used in the d$\ln r$ measure):
 \begin{equation}\label{eq:kernel}
 \boxed{
-  \hat K_\nu(q)
-  = \frac{\Gamma\!\bigl(\frac{\nu+1-iq}{2}\bigr)}
-         {\Gamma\!\bigl(\frac{\nu+1+iq}{2}\bigr)}\,2^{-iq}.
+  U_\nu(q)
+  = \frac{\Gamma\!\bigl(\frac{\nu+1+iq}{2}\bigr)}
+         {\Gamma\!\bigl(\frac{\nu+1-iq}{2}\bigr)}\,2^{+iq}.
 }
 \end{equation}
+The FFTLog computes $\hat A[n] = \hat g[n] \cdot U_\nu(q_n)$, where $\hat g$
+is the DFT (FFTW convention $e^{-2\pi i mn/N}$) and $q_n = 2\pi n/(N\Delta\!\ln)$.
+The numerator has $+iq$ because the DFT--Mellin product performs a cross-correlation
+(argument $s+t$), not a convolution ($s-t$); the Mellin variable $s = +iq$ produces
+the correlation kernel.
+
 \textbf{Key property:} the two Gamma arguments are complex conjugates
-(both have real part $(\nu+1)/2$ and imaginary parts $\mp q/2$), so
-$|\hat K_\nu(q)| = 1$ for all $q$.  There is \emph{no overflow} regardless
+(both have real part $(\nu+1)/2$ and imaginary parts $\pm q/2$), so
+$|U_\nu(q)| = 1$ for all $q$.  There is \emph{no overflow} regardless
 of grid size or Bessel order --- in contrast to formulations that use real $q$
 in the Gamma arguments, which grow as $\sim 2^{|q|}$ and overflow for
 $|q| \gtrsim 300$.
 
 The implementation computes~\eqref{eq:kernel} via
 \begin{equation}
-  \hat K_\nu(q) = \exp\bigl[
-    \mathrm{loggamma}\!\bigl(\tfrac{\nu+1}{2} - \tfrac{iq}{2}\bigr)
-    - \mathrm{loggamma}\!\bigl(\tfrac{\nu+1}{2} + \tfrac{iq}{2}\bigr)
-    - iq\log 2
+  U_\nu(q) = \exp\bigl[
+    \mathrm{loggamma}\!\bigl(\tfrac{\nu+1}{2} + \tfrac{iq}{2}\bigr)
+    - \mathrm{loggamma}\!\bigl(\tfrac{\nu+1}{2} - \tfrac{iq}{2}\bigr)
+    + iq\log 2
   \bigr],
 \end{equation}
 which avoids overflow at large $|\nu|$.
 
-\paragraph{Convention note.}
-Some references (e.g.\ Talman 1978) write the kernel with the opposite sign
-convention ($+iq$ in the numerator, $2^{+iq}$).  This corresponds to the
-$e^{+iq\tau}$ Fourier transform, which is related to the FFTW convention
-by complex conjugation.  An implementation must match the kernel convention
-to the FFT library's sign convention; using the wrong sign produces a kernel
-with $|\hat K| \sim 10^{|q|/3}$ that overflows for large grids.
+\paragraph{Output convention.}
+The FFTLog output must be \emph{reversed} (the ``natural'' output grid starts
+at $1/r_{\min}$; reversing maps it to the useful grid starting at $1/r_{\max}$),
+and the result includes an extra factor of $k_r$ from the kernel
+$K(t) = t\,J_\nu(t)$.  The caller divides by $k_r$ to obtain the pure Hankel
+transform.
+
+\paragraph{Convention warning.}
+The Fourier transform of $J_\nu(e^\tau)$ with the $e^{-iq\tau}$ convention gives
+$\bar U_\nu(q) = 2^{-iq}\,\Gamma((\nu+1-iq)/2)/\Gamma((\nu+1+iq)/2)$, which is
+the \emph{complex conjugate} of~\eqref{eq:kernel}.  Using $\bar U$ instead of $U$
+produces a convolution ($s-t$ argument) rather than the required correlation ($s+t$),
+giving the wrong transform.  The sign must match: $+iq$ in the numerator for
+FFTW's $e^{-2\pi imn/N}$ convention.
 
 \subsection{Discrete implementation}
 
@@ -1329,10 +1342,15 @@ Bessel truncation in Graf shift
     $|m| \le \min(M_{\max},\,\lceil k_r x_0\rceil + 20)$. \\[6pt]
 Miller backward recurrence
   & ${\sim}10\times$ on Bessel eval
-  & Compute $J_0(x), J_1(x), \ldots, J_{M_{\max}}(x)$ in a single
-    $O(M_{\max})$ backward-recurrence pass, normalised against
-    $J_0(x)$.  Use $J_{-m}(x) = (-1)^m J_m(x)$ for negative
-    orders. \\[6pt]
+  & Compute $J_0(x), \ldots, J_{M}(x)$ via the recurrence
+    $J_{m-1}(x) = (2m/x)\,J_m(x) - J_{m+1}(x)$,
+    starting from $J_{m_{\mathrm{start}}} = 1$, $J_{m_{\mathrm{start}}+1} = 0$
+    and normalising against $J_0(x)$.
+    The starting index must satisfy
+    $m_{\mathrm{start}} \ge M + \max(30,\, 15\sqrt{x})$;
+    starting too far above $x$ overflows for small $x$.
+    Use $J_{-m}(x) = (-1)^m J_m(x)$ for negative orders.
+    \textbf{Caution:} the coefficient is $2m/x$, not $2(m{+}1)/x$. \\[6pt]
 SIMD vectorization
   & $2$--$4\times$ on Step~4
   & The inner loop $\sum_m \tilde A_{m+l}\,J_m$ is a dot product
