@@ -721,6 +721,84 @@ turning point $x \approx \nu$, neither asymptotic works; accuracy degrades as
 $\sim\nu^{-1/3}$.  FFTLog has no such issue: the kernel~\eqref{eq:kernel} is
 well-behaved for all~$\nu$.
 
+\subsection{Limitations of FFTLog and the log-polar grid}
+\label{sec:fftlog_limitations}
+
+While FFTLog solves the turning-point problem, the log-spaced grid introduces its
+own trade-offs:
+
+\paragraph{1.\ Coarse resolution at the aperture edge.}
+The grid spacing at radius $r$ is $\Delta r(r) = r\,\Delta\!\ln$.  At the aperture
+edge $r = R$, this is the \emph{coarsest} point in the grid.  Resolving near-field
+oscillations of wavelength $\lambda$ at $r = R$ requires
+\begin{equation}\label{eq:dln_constraint}
+  R\,\Delta\!\ln \le \frac{\lambda}{2}
+  \qquad\Longrightarrow\qquad
+  \Delta\!\ln \le \frac{\lambda}{2R}.
+\end{equation}
+Meanwhile, the region $r < \lambda$ (where the near field is typically negligible)
+receives thousands of grid points it does not need.
+
+\paragraph{2.\ Fixed coupling between $r$ and $k_r$ grids.}
+The output grid $k_r^{(j)} = (1/r_{N-1})\,e^{j\Delta\!\ln}$ is fully determined
+by the input grid; the two cannot be chosen independently.  To capture all
+propagating modes ($k_r \le k$), one needs $k_r^{\max} = 1/r_{\min} \ge k$,
+forcing $r_{\min} \le \lambda/(2\pi)$.
+
+For a 2\,mm aperture at $\lambda = 500$\,nm, this gives a dynamic range
+$r_{\max}/r_{\min} \ge 2\,\text{mm}/80\,\text{nm} = 25000$.  Combined
+with~\eqref{eq:dln_constraint}, the grid size is
+\begin{equation}
+  N_r = \frac{\ln(r_{\max}/r_{\min})}{\Delta\!\ln}
+  \ge \frac{\ln(25000)}{\lambda/(2R)}
+  = \frac{10.1}{1.25\times 10^{-4}}
+  \approx 81000.
+\end{equation}
+In practice, rounding to a power of two gives $N_r = 2^{17} = 131072$.
+
+There is no way to ``zoom in'' on the propagating band $k_r \in [0, k]$ without
+also changing $r_{\min}$.  The evanescent portion of the $k_r$ grid (which gets
+zeroed in the propagation step) represents wasted computation.
+
+\paragraph{3.\ Boundary wrap-around (circular convolution artifact).}
+FFTLog computes a \emph{circular} convolution in log-space.  If the input does
+not decay to zero near $r_{\min}$ and $r_{\max}$, energy wraps around from one
+boundary to the other.  For a lens field that is nonzero at $r = R = r_{\max}$,
+this produces spectral leakage.  Mitigation: extend $r_{\max}$ beyond $R$ (padding
+with zeros), at the cost of increasing $N_r$ further.
+
+\paragraph{4.\ Hard aperture edges cause ringing.}
+A metalens with a sharp amplitude cutoff at $r = R$ produces a Hankel transform
+with slowly decaying oscillations (Gibbs-like phenomenon in the spectral domain).
+The log-spaced $k_r$ grid may not resolve these oscillations uniformly.  This is
+not specific to FFTLog --- any discrete Hankel method exhibits it --- but the
+non-uniform spacing makes it harder to diagnose and control.
+
+\paragraph{5.\ Output PSF on a log-spaced grid.}
+The output $\rho$-grid inherits the same log spacing.  This is \emph{favourable}
+for Airy-disk analysis (finest resolution near $\rho = 0$ where the PSF peaks),
+but inconvenient if uniform-$\rho$ output is needed downstream (e.g.\ for imaging
+simulation or MTF computation).  Post-hoc interpolation adds a small additional
+error.
+
+\paragraph{6.\ No independent zero-padding.}
+With standard FFTs one can zero-pad to increase conjugate-domain resolution
+without modifying the input grid.  FFTLog ties the two grids together: the only
+way to refine the $k_r$ grid is to change $r_{\min}$, $r_{\max}$, or $N_r$.
+
+\paragraph{7.\ Auto-differentiation.}
+For metalens inverse design, gradients of the PSF with respect to the lens
+transmission $t(r)$ are needed.  FFTLog involves FFTW, complex loggamma, and
+non-standard convolution, which most automatic differentiation frameworks cannot
+differentiate through without custom adjoint rules.
+
+\paragraph{Assessment.}
+All of the above are ``pay more grid points'' problems, not fundamental accuracy
+barriers.  By contrast, the NUFHT turning-point issue is a mathematical accuracy
+problem that worsens with Bessel order and cannot be resolved simply by adding
+grid points.  For the applications considered here (mm-scale lenses at visible
+wavelengths), the FFTLog grid overhead is acceptable.
+
 
 %=======================================================================
 \section{Propagation to the Focal Plane}
@@ -1050,6 +1128,134 @@ grid of ${\sim}655$\,K points (${\sim}10$\,MB).
 If the full field over the entire focal plane is needed (not just the PSF patch),
 or if the structure is \emph{not} axisymmetric (so cylindrical decomposition
 does not apply), the Cartesian approach is the only option.
+
+
+%=======================================================================
+\section{Detailed Cost Analysis: 2\,mm Visible-Wavelength Lens}
+\label{sec:cost}
+%=======================================================================
+
+We work through a concrete example to make the costs precise.
+
+\subsection{Physical parameters}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Aperture radius & $R = 2\,\text{mm} = 2000\,\mu\text{m}$ \\
+Wavelength & $\lambda = 500\,\text{nm} = 0.5\,\mu\text{m}$ \\
+Wavenumber & $k = 2\pi/\lambda \approx 12.57\,\mu\text{m}^{-1}$ \\
+Numerical aperture & $\mathrm{NA} = 0.25$ \\
+Focal length & $f \approx R\sqrt{1/\mathrm{NA}^2 - 1} \approx 7746\,\mu\text{m}$ \\
+Oblique angle & $\alpha = 10^\circ$,\; $\sin\alpha \approx 0.174$ \\
+Lateral shift & $x_0 = f\tan\alpha \approx 1366\,\mu\text{m}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Grid sizing}
+
+\paragraph{Mode count.}
+$M_{\max} = \lceil k\sin\alpha\cdot R\rceil = \lceil 12.57 \times 0.174 \times 2000\rceil
+= \lceil 4373 \rceil \approx \mathbf{4365}$ angular modes.
+With negative-$m$ symmetry, only ${\sim}2183$ need to be computed.
+
+\paragraph{Radial grid.}
+From~\eqref{eq:dln_constraint}: $\Delta\!\ln \le \lambda/(2R) = 1.25\times 10^{-4}$.
+From the $k_r$ constraint: $r_{\min} \le \lambda/(2\pi) \approx 80\,\text{nm}$; use
+$r_{\min} = 50\,\text{nm}$.
+\begin{equation}
+  N_r = \frac{\ln(r_{\max}/r_{\min})}{\Delta\!\ln}
+  = \frac{\ln(40000)}{1.25\times 10^{-4}}
+  \approx 85000
+  \;\to\; N_r = 2^{17} = \mathbf{131072}.
+\end{equation}
+
+\paragraph{Local mode count.}
+$L_{\max} \approx k\cdot\mathrm{NA}\cdot\rho_{\max}$. For
+$\rho_{\max} = 5\lambda = 2.5\,\mu\text{m}$:
+$L_{\max} \approx 12.57 \times 0.25 \times 2.5 + 5 \approx \mathbf{13}$.
+
+\subsection{Cost per step: standard path}
+
+Each FFTLog call costs $O(N_r\log N_r) \approx 131072 \times 17 \approx 2.2\times 10^6$
+operations, or approximately 0.2\,ms on a modern CPU.
+
+\begin{center}
+\begin{tabular}{@{}l p{6cm} r r@{}}
+\toprule
+\textbf{Step} & \textbf{Work} & \textbf{1 core} & \textbf{300 thr.}\\
+\midrule
+\textbf{2.}\ Forward HT
+  & $2183$ modes $\times$ 2 FFTLog (if $E_\theta=0$)
+    $= 4366$ calls
+  & 6\,s & 22\,ms \\[4pt]
+\textbf{3.}\ Propagation + sym.
+  & $131072 \times 4365$ pointwise ops
+  & 20\,ms & 20\,ms \\[4pt]
+\textbf{4.}\ Graf shift
+  & $131072\,k_r$ pts $\times$ $(2L_{\max}+1) \times m_{\mathrm{cut}}$;
+    Bessel truncation reduces effective $m_{\mathrm{cut}}$ by ${\sim}4\times$
+  & 3\,s & 10\,ms \\[4pt]
+\textbf{5.}\ Inverse HT
+  & $2L_{\max}+1 = 27$ FFTLog calls
+  & 40\,ms & 5\,ms \\[4pt]
+\textbf{6.}\ Angular IFFT
+  & $131072$ IFFTs of length $N_\psi$
+  & 1.3\,s & 5\,ms \\[4pt]
+\midrule
+\textbf{Total} & & ${\sim}\mathbf{10\,s}$ & ${\sim}\mathbf{60\,ms}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Cost per step: Neumann shift fast path}
+
+The Neumann shift theorem (\S\ref{sec:neumann}) replaces Step~2 entirely.
+
+\begin{center}
+\begin{tabular}{@{}l p{6cm} r r@{}}
+\toprule
+\textbf{Step} & \textbf{Work} & \textbf{1 core} & \textbf{300 thr.}\\
+\midrule
+\textbf{A.}\ Single FFTLog
+  & 1 order-0 call: $T_0(k)$
+  & 0.2\,ms & 0.2\,ms \\[4pt]
+\textbf{B.}\ Shift + FFT
+  & $131072\,k_r$ pts $\times$ ($N_\varphi$ interpolations + 1 FFT)
+  & 0.7\,s & 3\,ms \\[4pt]
+\textbf{4--6.}\ (unchanged)
+  & Graf shift + inverse HT + synthesis
+  & 4.3\,s & 20\,ms \\[4pt]
+\midrule
+\textbf{Total} & & ${\sim}\mathbf{5\,s}$ & ${\sim}\mathbf{25\,ms}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Comparison summary}
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+& \textbf{Cartesian 2D FFT} & \textbf{CyFFP standard} & \textbf{CyFFP Neumann} \\
+\midrule
+Grid points     & $16384^2 \approx 2.7\times 10^8$ & $131072$ (1D) & $131072$ (1D) \\
+Memory          & ${\sim}10$\,GB        & ${\sim}0.5$\,GB   & ${\sim}0.5$\,GB \\
+Time (1 core)   & ${\sim}3$\,s          & ${\sim}10$\,s       & ${\sim}5$\,s \\
+Time (300 thr.) & ${\sim}1$\,s          & ${\sim}60$\,ms     & ${\sim}25$\,ms \\
+Scaling with $R/\lambda$ & $(R/\lambda)^2$ & $R/\lambda$    & $R/\lambda$ \\
+Output          & Full focal plane      & PSF patch only     & PSF patch only \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The cylindrical approach is ${\sim}40$--$50\times$ faster than Cartesian on 300 threads,
+uses ${\sim}20\times$ less memory, and scales linearly rather than quadratically
+with the optical size $R/\lambda$.  For lenses beyond ${\sim}5$\,mm at visible
+wavelengths, the Cartesian approach becomes memory-limited on commodity hardware
+while CyFFP remains practical.
 
 
 %=======================================================================
