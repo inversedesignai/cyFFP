@@ -138,21 +138,30 @@ function compute_TE_TM_coeffs(Em_r::Matrix{ComplexF64},
     kr_grid   = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
     kz_over_k = @. sqrt(max(1.0 - (kr_grid / k)^2, 0.0))
 
+    # Detect if E_theta is identically zero → skip 2 FFTLog calls per mode
+    etheta_zero = iszero(Em_theta)
+
     results = pmap(1:N_modes) do idx
         m   = m_pos[idx]
         fr  = r .* Em_r[:, idx]
-        fth = r .* Em_theta[:, idx]
 
         Hmp1_r  = fftlog_hankel(fr,  dln, Float64(m + 1))
         Hmm1_r  = fftlog_hankel(fr,  dln, Float64(m - 1))
-        Hmm1_th = fftlog_hankel(fth, dln, Float64(m - 1))
-        Hmp1_th = fftlog_hankel(fth, dln, Float64(m + 1))
 
-        col_TE = (im/2)  .* (Hmp1_r  .+ Hmm1_r)  .+
-                 (1.0/2) .* (Hmm1_th .- Hmp1_th)
+        if etheta_zero
+            col_TE = (im/2) .* (Hmp1_r .+ Hmm1_r)
+            col_TM = -(kz_over_k ./ 2) .* (Hmm1_r .- Hmp1_r)
+        else
+            fth = r .* Em_theta[:, idx]
+            Hmm1_th = fftlog_hankel(fth, dln, Float64(m - 1))
+            Hmp1_th = fftlog_hankel(fth, dln, Float64(m + 1))
 
-        col_TM = -(kz_over_k ./ 2) .* (Hmm1_r  .- Hmp1_r)  .-
-                 im .* (kz_over_k ./ 2) .* (Hmm1_th .+ Hmp1_th)
+            col_TE = (im/2)  .* (Hmp1_r  .+ Hmm1_r)  .+
+                     (1.0/2) .* (Hmm1_th .- Hmp1_th)
+
+            col_TM = -(kz_over_k ./ 2) .* (Hmm1_r  .- Hmp1_r)  .-
+                     im .* (kz_over_k ./ 2) .* (Hmm1_th .+ Hmp1_th)
+        end
 
         (col_TE, col_TM)
     end
@@ -357,6 +366,14 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 function _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
+    # Check that the kr grid reaches the propagating band
+    kr_max = 1.0 / r[1]
+    if kr_max < k
+        @warn "kr_max = 1/r_min = $(round(kr_max, sigdigits=4)) < k = $(round(k, sigdigits=4)). " *
+              "Propagating modes with kr > kr_max are lost. " *
+              "Decrease r_min to at most 1/k = $(round(1/k, sigdigits=4))."
+    end
+
     # Step 2: Forward Hankel transforms (m ≥ 0 only — half the work)
     A_TE, A_TM, kr_grid = compute_TE_TM_coeffs(Em_r, Em_theta, m_pos, r, k)
 
