@@ -249,10 +249,15 @@ function u_oblique_9(rv, th)
     return exp(-im * k_9 * (d - f_9))
 end
 
-println("  Building near field and decomposing...")
-Er_9  = ComplexF64[u_oblique_9(r_9[jr], theta_9[jt]) * sin(theta_9[jt])
+println("  Building near field (with aperture r ≤ R)...")
+# A real lens has finite aperture: field is zero for r > R.
+# Without this cutoff, the lens phase extends to r_max and causes
+# boundary aliasing in FFTLog.
+# Smooth super-Gaussian taper avoids Gibbs ringing from a hard edge.
+aperture(rv) = exp(-(rv / R_9)^20)
+Er_9  = ComplexF64[u_oblique_9(r_9[jr], theta_9[jt]) * sin(theta_9[jt]) * aperture(r_9[jr])
                     for jr in 1:Nr_9, jt in 1:Ntheta_9]
-Et_9  = ComplexF64[u_oblique_9(r_9[jr], theta_9[jt]) * cos(theta_9[jt])
+Et_9  = ComplexF64[u_oblique_9(r_9[jr], theta_9[jt]) * cos(theta_9[jt]) * aperture(r_9[jr])
                     for jr in 1:Nr_9, jt in 1:Ntheta_9]
 
 # Step 1: angular decomposition
@@ -333,6 +338,54 @@ println("  9e: Mode energy at M_max / peak: $(round(tail_ratio_9, sigdigits=3))"
 println("  9e: Truncation adequate ✓")
 
 println("  Test 9 PASSED ✓")
+
+
+# ─── Test 10: Round-trip for realistic lens individual HTs ────
+println("\n--- Test 10: Round-trip H_ν → H_ν⁻¹ for realistic lens modes ---")
+# The Hankel transform with r dr measure is self-inverse:
+#   ∫ [∫ f(r') J_ν(kr') r' dr'] J_ν(kr) k dk = f(r)
+#
+# Forward: raw = fftlog_hankel(r×f, dln, ν) = kr × H_ν[f](kr)
+# Inverse: feed raw back into fftlog_hankel at order ν
+#          → gets kr' × H_ν[kr × H_ν[f]](r) = kr' × f(r) × (normalization)
+#
+# Compare the shape of the round-trip output against the original r×E_m.
+
+max_rt_err_10 = 0.0
+modes_tested = 0
+for m_rt in [1, 2, 3, 5, min(M_max_9, 10)]
+    idx_rt = m_rt + 1
+    g_orig = r_9c .* Em_r_9[:, idx_rt]   # r × E_{m,r}
+
+    # Skip if this mode has negligible amplitude (e.g., m=0 for y-pol sinθ)
+    if maximum(abs.(g_orig)) < 1e-6 * maximum(abs.(r_9c .* Em_r_9[:, 2])); continue; end
+
+    # Forward: order m+1
+    raw_fwd = fftlog_hankel(g_orig, dln, Float64(m_rt + 1))
+
+    # Inverse: feed raw back (it's kr × H, which is the correct input for
+    # the self-inverse property since we need ∫ H(kr) J_ν(kr r) kr dkr)
+    raw_inv = fftlog_hankel(raw_fwd, dln, Float64(m_rt + 1))
+
+    # Compare shapes in the interior where E_m has support (r ~ 0.1 to R)
+    sig = findall(abs.(g_orig) .> 1e-4 * maximum(abs.(g_orig)))
+    if length(sig) < 10; continue; end
+
+    g_sig = g_orig[sig]
+    r_sig = raw_inv[sig]
+
+    # Fit scale factor
+    scale_rt = real(sum(g_sig .* conj.(r_sig)) / (sum(abs2.(r_sig)) + 1e-30))
+    err_rt = maximum(abs.(r_sig .* scale_rt .- g_sig) ./ (abs.(g_sig) .+ 1e-30))
+    global max_rt_err_10 = max(max_rt_err_10, err_rt)
+    global modes_tested += 1
+    println("  m=$m_rt: round-trip shape error = $(round(err_rt, sigdigits=3)), scale = $(round(scale_rt, sigdigits=4))")
+end
+println("  Modes tested: $modes_tested")
+println("  Max round-trip error: $(round(max_rt_err_10, sigdigits=3))")
+@assert modes_tested > 0 "No modes had significant amplitude"
+@assert max_rt_err_10 < 0.15 "Round-trip error too large for realistic lens"
+println("  PASSED ✓")
 
 
 println("\n" * "="^60)
