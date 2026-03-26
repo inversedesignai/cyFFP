@@ -9,9 +9,10 @@
 module CyFFP
 
 using FFTW
-using SpecialFunctions: loggamma
+using SpecialFunctions: loggamma, besselj
 
-export angular_decompose, fftlog_hankel, compute_TE_TM_coeffs, propagate_and_symmetrize
+export angular_decompose, fftlog_hankel, compute_TE_TM_coeffs, propagate_and_symmetrize,
+       graf_shift
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -323,6 +324,117 @@ function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
     end
 
     return A_tilde, m_full
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 4 — Graf's Addition Theorem (Modal Basis Shift)
+#
+# Re-expand the far field in a local basis centered at (x₀, 0):
+#
+#   B_l(kr) = Σ_{m=-M_max}^{M_max} Ã_{m+l}(kr) J_m(kr x₀)
+#
+# for |l| ≤ L_max.  The weight J_m(kr x₀) decays exponentially
+# for |m| > kr x₀, so the inner sum is naturally truncated at
+# m_cut = min(M_max, ceil(kr x₀) + buffer).
+#
+# Normal incidence (x₀→0): J_m(0) = δ_{m,0} ⟹ B_l = Ã_l.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    _besselj_range(m_max, x) -> Vector{Float64}
+
+Compute J_0(x), J_1(x), ..., J_{m_max}(x) via Miller backward recurrence.
+Normalized against besselj(0, x).  ~10× faster than individual besselj calls.
+"""
+function _besselj_range(m_max::Int, x::Float64)
+    if m_max < 0; return Float64[]; end
+    if abs(x) < 1e-30
+        out = zeros(Float64, m_max + 1)
+        out[1] = 1.0   # J_0(0) = 1
+        return out
+    end
+    # Miller backward recurrence: start above m_max but not so far
+    # that intermediate values overflow.  The recurrence amplifies by
+    # ~(2m/x) per step, so starting too far above x causes overflow
+    # for small x.
+    m_start = m_max + max(30, ceil(Int, 15 * sqrt(max(1.0, abs(x)))))
+    jnp1 = 0.0
+    jn   = 1.0
+    out  = zeros(Float64, m_max + 1)
+    for m in m_start:-1:0
+        # Recurrence: J_{m-1}(x) = (2m/x) J_m(x) - J_{m+1}(x)
+        jnm1 = (2m / x) * jn - jnp1
+        if m <= m_max
+            out[m + 1] = jn
+        end
+        jnp1 = jn
+        jn   = jnm1
+    end
+    # Normalize using J_0 from the standard library
+    scale = besselj(0, x) / out[1]
+    out .*= scale
+    return out
+end
+
+"""
+    graf_shift(A_tilde, m_full, kr_grid, x0, L_max) -> B[Nkr, 2L_max+1]
+
+Apply Graf's addition theorem at every kr point:
+    B_l(kr) = Σ_m Ã_{m+l}(kr) J_m(kr x₀)
+for |l| ≤ L_max.
+
+# Arguments
+- `A_tilde[Nkr, 2M_max+1]`: propagated coefficients (m = -M_max:M_max)
+- `m_full`: mode list [-M_max, ..., M_max]
+- `kr_grid`: log-spaced kr grid
+- `x0`: lateral shift = f tan(α)
+- `L_max`: local mode truncation
+
+# Returns
+- `B[Nkr, 2L_max+1]`: local modal coefficients, columns = l = -L_max:L_max
+"""
+function graf_shift(A_tilde::Matrix{ComplexF64},
+                     m_full::Vector{Int},
+                     kr_grid::Vector{Float64},
+                     x0::Float64,
+                     L_max::Int)
+    M_max = (length(m_full) - 1) ÷ 2
+    Nkr   = length(kr_grid)
+    Nl    = 2L_max + 1
+    B     = zeros(ComplexF64, Nkr, Nl)
+
+    # Warm FFTW cache not needed here — no FFT calls.
+    # Thread over kr points (each is independent).
+    Threads.@threads for ikr in 1:Nkr
+        kr_x0 = kr_grid[ikr] * x0
+
+        # Bessel truncation: J_m(z) ≈ 0 for |m| > z + buffer
+        m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
+
+        # Compute J_0..J_{m_cut} via fast recurrence
+        Jp = _besselj_range(m_cut, kr_x0)
+
+        # Build full Bessel weight vector for m = -m_cut:m_cut
+        # J_{-m}(x) = (-1)^m J_m(x)
+        Jw = Vector{Float64}(undef, 2m_cut + 1)
+        @inbounds for m in 0:m_cut
+            Jw[m + m_cut + 1] = Jp[m + 1]                            # m ≥ 0
+            Jw[-m + m_cut + 1] = iseven(m) ? Jp[m + 1] : -Jp[m + 1] # m < 0
+        end
+
+        # Compute B_l = Σ_m Ã_{m+l} J_m for each l
+        @inbounds for (li, l) in enumerate(-L_max:L_max)
+            acc = zero(ComplexF64)
+            m_lo = max(-m_cut, -M_max - l)
+            m_hi = min( m_cut,  M_max - l)
+            @simd for m in m_lo:m_hi
+                acc += A_tilde[ikr, m + l + M_max + 1] * Jw[m + m_cut + 1]
+            end
+            B[ikr, li] = acc
+        end
+    end
+    return B
 end
 
 end  # module CyFFP
