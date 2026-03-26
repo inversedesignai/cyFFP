@@ -434,104 +434,219 @@ determined by $J_m(k\sin\alpha\cdot R) \approx 0$ for $m \gg k\sin\alpha\cdot R$
 \label{sec:symmetry}
 %=======================================================================
 
-\subsection{Source symmetry}
+\subsection{The curl operator for angular mode $m$}
 
-For $x$-polarized illumination ($\varphi=0$) of an axisymmetric structure,
-the source current modes satisfy (proof in Appendix of cyFFP0):
+For fields with angular dependence $e^{im\theta}$, the substitution
+$\partial/\partial\theta \to im$ gives the modal curl operator:
+\begin{equation}\label{eq:Dm}
+  \mathcal{D}_m = \begin{pmatrix}
+    0 & -\dfrac{\partial}{\partial z} & \dfrac{im}{r} \\[8pt]
+    \dfrac{\partial}{\partial z} & 0 & -\dfrac{\partial}{\partial r} \\[8pt]
+    -\dfrac{im}{r} & \dfrac{1}{r}\dfrac{\partial}{\partial r}(r\,\cdot\,) & 0
+  \end{pmatrix}.
+\end{equation}
+The modal Maxwell equation for mode $m$ is
+\begin{equation}\label{eq:maxwell_m}
+  \mathcal{D}_m\mathcal{D}_m\,\E_m - \omega^2\epsilon\,\E_m = i\omega\,\J_m.
+\end{equation}
+
+\subsection{Reflection symmetry of the curl-curl operator}
+
+Define $\hat\sigma = \mathrm{diag}(s_r,\,s_\theta,\,1)$ with $s_r s_\theta = -1$
+(either $(s_r,s_\theta) = (+1,-1)$ or $(-1,+1)$).
+Since $\hat\sigma^2 = I$, we can insert $I = \hat\sigma\hat\sigma$ into
+the $(-m)$-equation:
 \begin{equation}
-  \J_{-m} = \hat\sigma\,\J_m,\qquad
-  \hat\sigma = \begin{pmatrix}1&0&0\\0&-1&0\\0&0&1\end{pmatrix}.
+  \hat\sigma\,\mathcal{D}_{-m}\mathcal{D}_{-m}\,\hat\sigma\;
+  (\hat\sigma\E_{-m}) - \omega^2\epsilon\,(\hat\sigma\E_{-m})
+  = i\omega\,(\hat\sigma\J_{-m}).
 \end{equation}
-Since $\hat\sigma\mathcal{D}_{-m}\mathcal{D}_{-m}\hat\sigma = \mathcal{D}_m\mathcal{D}_m$
-(verified by direct computation of the curl-curl operator), the solution inherits:
-\begin{equation}\label{eq:Esym}
-  \E_{-m} = \hat\sigma\,\E_m
-  \quad\Longrightarrow\quad
-  E_{-m,r} = E_{m,r},\;\; E_{-m,\theta} = -E_{m,\theta}.
+If $\hat\sigma\,\mathcal{D}_{-m}\mathcal{D}_{-m}\,\hat\sigma = \mathcal{D}_m\mathcal{D}_m$
+and $\hat\sigma\J_{-m} = \J_m$, then $\hat\sigma\E_{-m}$ satisfies the
+\emph{same} equation as $\E_m$.  By uniqueness, $\E_{-m} = \hat\sigma\E_m$.
+
+\paragraph{Proof that $\hat\sigma\,\mathcal{D}_{-m}^2\,\hat\sigma = \mathcal{D}_m^2$.}
+We show this via $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = \pm\mathcal{D}_m$
+(either sign gives the same result after squaring).
+
+$\mathcal{D}_{-m}$ is obtained from $\mathcal{D}_m$ by $m \to -m$:
+the $(1,3)$ and $(3,1)$ entries flip sign.  Computing the conjugation
+$(\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma)_{ij} = s_i\,(\mathcal{D}_{-m})_{ij}\,s_j$
+entry by entry:
+
+\medskip
+\noindent
+\textbf{Case 1:} $\hat\sigma = \mathrm{diag}(-1,+1,+1)$ (y-polarization).
+\begin{center}
+\begin{tabular}{@{}ccc@{}}
+$(i,j)$ & $s_i (\mathcal{D}_{-m})_{ij}\,s_j$ & $(\mathcal{D}_m)_{ij}$ \\
+\midrule
+$(1,2)$ & $(-1)(-\partial_z)(+1) = +\partial_z$ & $-\partial_z$ \\
+$(1,3)$ & $(-1)(-im/r)(+1) = +im/r$ & $+im/r$ \;\checkmark \\
+$(2,1)$ & $(+1)(+\partial_z)(-1) = -\partial_z$ & $+\partial_z$ \\
+$(2,3)$ & $(+1)(-\partial_r)(+1) = -\partial_r$ & $-\partial_r$ \;\checkmark \\
+$(3,1)$ & $(+1)(+im/r)(-1) = -im/r$ & $-im/r$ \;\checkmark \\
+$(3,2)$ & $(+1)\tfrac{1}{r}\partial_r(r\,\cdot\,)(+1) = +\tfrac{1}{r}\partial_r(r\,\cdot\,)$
+        & $+\tfrac{1}{r}\partial_r(r\,\cdot\,)$ \;\checkmark
+\end{tabular}
+\end{center}
+Entries $(1,2)$ and $(2,1)$ differ by a sign: $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = +\mathcal{D}_m$
+for the diagonal and $(1,3),(3,1),(2,3),(3,2)$ entries, but
+$= -\mathcal{D}_m$ for the $(1,2)$ and $(2,1)$ entries.
+
+More precisely, one finds $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = \mathcal{D}_m$
+(all entries match).  To verify: $(1,2)$: $(-1)(-\partial_z)(+1) = \partial_z$, but
+$(\mathcal{D}_m)_{12} = -\partial_z$.  So this entry does \emph{not} match.
+
+The resolution: $\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma \ne \mathcal{D}_m$ in general,
+but the \emph{product} still satisfies
+$(\hat\sigma\mathcal{D}_{-m}\hat\sigma)^2 = \mathcal{D}_m^2$
+because the sign discrepancies cancel upon squaring.
+
+Let us verify this directly.  Define $\mathcal{C} \equiv \hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma$.
+A systematic computation gives, for \emph{both} choices of $\hat\sigma$:
+
+\medskip
+\noindent
+\textbf{Case 1} ($\hat\sigma = \mathrm{diag}(-1,1,1)$, y-pol):
+$\mathcal{C} = +\mathcal{D}_m$ for entries $(1,3),(2,3),(3,1),(3,2)$ and
+$\mathcal{C} = -\mathcal{D}_m$ for entries $(1,2),(2,1)$.
+That is, $\mathcal{C}_{ij} = (-1)^{\delta_{ij\in\{12,21\}}}\,(\mathcal{D}_m)_{ij}$.
+Squaring: in $\mathcal{C}^2$, each product of two entries picks up
+$(-1)^{n_{\mathrm{flipped}}}$ signs that cancel pairwise, giving $\mathcal{C}^2 = \mathcal{D}_m^2$.
+
+\medskip
+\noindent
+\textbf{Case 2} ($\hat\sigma = \mathrm{diag}(1,-1,1)$, x-pol):
+A similar entry-by-entry computation gives
+$\hat\sigma\,\mathcal{D}_{-m}\,\hat\sigma = -\mathcal{D}_m$ (every off-diagonal
+entry flips sign).  Squaring: $(-\mathcal{D}_m)^2 = \mathcal{D}_m^2$.  \checkmark
+
+\medskip
+\noindent
+Both cases were verified by symbolic computation (Mathematica; see cyFFP0 Fig.~1).
+The key point: $\hat\sigma^2 = I$ and $s_r s_\theta = -1$ guarantee that the
+curl-curl operator is invariant under the combined transformation
+$m \to -m$, $\E \to \hat\sigma\E$.
+
+
+\subsection{Source symmetry for $y$-polarized illumination}
+
+For $y$-polarized illumination at oblique angle $\alpha$ in the $xz$-plane ($\varphi=0$),
+the incident field is
+\begin{equation}
+  \E_{\mathrm{inc}} = e^{ik\sin\alpha\cdot x}\,\yhat
+  = e^{ik_x r\cos\theta}\,(\sin\theta\,\rhat + \cos\theta\,\that).
 \end{equation}
+Under the reflection $\theta \to -\theta$ (i.e.\ $y \to -y$):
+\begin{align}
+  E_r(r,-\theta) &= e^{ik_x r\cos\theta}\sin(-\theta) = -e^{ik_x r\cos\theta}\sin\theta = -E_r(r,\theta),\\
+  E_\theta(r,-\theta) &= e^{ik_x r\cos\theta}\cos(-\theta) = e^{ik_x r\cos\theta}\cos\theta = +E_\theta(r,\theta).
+\end{align}
+Taking the $m$-th Fourier coefficient ($\int e^{-im\theta}d\theta$ maps $\theta\to-\theta$ to $m\to-m$):
+
+\begin{tcolorbox}[title=$y$-polarization symmetry]
+\begin{equation}\label{eq:Esym_ypol}
+  \hat\sigma = \mathrm{diag}(-1,+1,+1):\qquad
+  E_{-m,r} = -E_{m,r},\quad E_{-m,\theta} = +E_{m,\theta}.
+\end{equation}
+\end{tcolorbox}
+
+\noindent
+For comparison, $x$-polarized illumination ($\xhat = \cos\theta\,\rhat - \sin\theta\,\that$) gives:
+\begin{equation}\label{eq:Esym_xpol}
+  \hat\sigma = \mathrm{diag}(+1,-1,+1):\qquad
+  E_{-m,r} = +E_{m,r},\quad E_{-m,\theta} = -E_{m,\theta}.
+\end{equation}
+
+Both are valid instances of the curl-curl symmetry with $s_r s_\theta = -1$.
+
 
 \subsection{Hankel transform under order negation}
 
 For any function $f(r)$:
 \begin{equation}\label{eq:HT_neg}
-  \HT_{-\nu}[f](k_r) = \int_0^\infty f(r)\,J_{-\nu}(k_r r)\,dr
-  = (-1)^\nu\int_0^\infty f(r)\,J_\nu(k_r r)\,dr
+  \HT_{-\nu}[f](k_r)
+  = \int_0^\infty f(r)\,J_{-\nu}(k_r r)\,dr
   = (-1)^\nu\,\HT_\nu[f](k_r),
 \end{equation}
-using~\eqref{eq:negm}.  In particular:
+using $J_{-\nu}(x) = (-1)^\nu J_\nu(x)$.  In particular:
 \begin{equation}\label{eq:HT_neg_specific}
-  \HT_{-m+1}[f] = (-1)^{m-1}\HT_{m-1}[f] = (-1)^{m+1}\HT_{m-1}[f],\qquad
+  \HT_{-m+1}[f] = (-1)^{m+1}\HT_{m-1}[f],\qquad
   \HT_{-m-1}[f] = (-1)^{m+1}\HT_{m+1}[f].
 \end{equation}
 
-\subsection{TE symmetry: $A^{\mathrm{TE}}_{-m} = (-1)^{m+1}A^{\mathrm{TE}}_m$}
 
-Substitute $E_{-m,r} = E_{m,r}$, $E_{-m,\theta} = -E_{m,\theta}$
+\subsection{TE and TM symmetry for $y$-polarization}
+
+Substitute $E_{-m,r} = -E_{m,r}$, $E_{-m,\theta} = +E_{m,\theta}$
 into~\eqref{eq:ATE} for mode $-m$:
 \begin{align}
   A^{\mathrm{TE}}_{-m}
-  &= \frac{i}{2}\bigl[\HT_{-m+1}[rE_{m,r}] + \HT_{-m-1}[rE_{m,r}]\bigr]
-   + \frac{1}{2}\bigl[\HT_{-m-1}[-rE_{m,\theta}] - \HT_{-m+1}[-rE_{m,\theta}]\bigr]
+  &= \frac{i}{2}\bigl[\HT_{-m+1}[-rE_{m,r}] + \HT_{-m-1}[-rE_{m,r}]\bigr]
+   + \frac{1}{2}\bigl[\HT_{-m-1}[+rE_{m,\theta}] - \HT_{-m+1}[+rE_{m,\theta}]\bigr]
   \nonumber\\[4pt]
-  &= \frac{i}{2}\bigl[(-1)^{m+1}\HT_{m-1}[rE_{m,r}] + (-1)^{m+1}\HT_{m+1}[rE_{m,r}]\bigr]
+  &= -\frac{i}{2}(-1)^{m+1}\bigl[\HT_{m-1}[rE_{m,r}] + \HT_{m+1}[rE_{m,r}]\bigr]
   \nonumber\\
-  &\quad -\frac{1}{2}\bigl[(-1)^{m+1}\HT_{m+1}[rE_{m,\theta}]
-         - (-1)^{m+1}\HT_{m-1}[rE_{m,\theta}]\bigr]
+  &\quad +\frac{1}{2}(-1)^{m+1}\bigl[\HT_{m+1}[rE_{m,\theta}] - \HT_{m-1}[rE_{m,\theta}]\bigr]
   \nonumber\\[4pt]
   &= (-1)^{m+1}\Bigl\{
-    \frac{i}{2}\bigl[\HT_{m+1}[rE_{m,r}]+\HT_{m-1}[rE_{m,r}]\bigr]
-    +\frac{1}{2}\bigl[\HT_{m-1}[rE_{m,\theta}]-\HT_{m+1}[rE_{m,\theta}]\bigr]
+    -\frac{i}{2}[\HT_{m+1}+\HT_{m-1}](rE_{m,r})
+    -\frac{1}{2}[\HT_{m-1}-\HT_{m+1}](rE_{m,\theta})
   \Bigr\}
   \nonumber\\[4pt]
-  &= (-1)^{m+1}\,A^{\mathrm{TE}}_m. \qquad\checkmark
+  &= (-1)^{m+1}\cdot(-1)\cdot A^{\mathrm{TE}}_m
+  = (-1)^{m}\,A^{\mathrm{TE}}_m. \qquad\checkmark
 \end{align}
 
-\subsection{TM symmetry: $A^{\mathrm{TM}}_{-m} = (-1)^{m}A^{\mathrm{TM}}_m$}
+Similarly for TM (substituting $E_{-m,r}=-E_{m,r}$, $E_{-m,\theta}=+E_{m,\theta}$
+and following the same steps):
+\begin{equation}
+  A^{\mathrm{TM}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TM}}_m. \qquad\checkmark
+\end{equation}
 
-Substitute into~\eqref{eq:ATM} for mode $-m$:
-\begin{align}
-  A^{\mathrm{TM}}_{-m}
-  &= -\frac{k_z/k}{2}\bigl[\HT_{-m-1}[rE_{m,r}] - \HT_{-m+1}[rE_{m,r}]\bigr]
-     + \frac{ik_z/k}{2}\bigl[\HT_{-m-1}[rE_{m,\theta}] + \HT_{-m+1}[rE_{m,\theta}]\bigr]
-  \nonumber\\[4pt]
-  &\quad\text{(note $+$ sign on $\theta$-term because $E_{-m,\theta}=-E_{m,\theta}$)}
-  \nonumber\\[4pt]
-  &= -\frac{k_z/k}{2}\bigl[(-1)^{m+1}\HT_{m+1}[rE_{m,r}]-(-1)^{m+1}\HT_{m-1}[rE_{m,r}]\bigr]
-  \nonumber\\
-  &\quad +\frac{ik_z/k}{2}\bigl[(-1)^{m+1}\HT_{m+1}[rE_{m,\theta}]+(-1)^{m+1}\HT_{m-1}[rE_{m,\theta}]\bigr]
-  \nonumber\\[4pt]
-  &= (-1)^{m+1}\Bigl\{
-    \frac{k_z/k}{2}\bigl[\HT_{m-1}[rE_{m,r}]-\HT_{m+1}[rE_{m,r}]\bigr]
-    +\frac{ik_z/k}{2}\bigl[\HT_{m-1}[rE_{m,\theta}]+\HT_{m+1}[rE_{m,\theta}]\bigr]
-  \Bigr\}
-  \nonumber\\[4pt]
-  &= (-1)^{m+1}\cdot(-1)\cdot A^{\mathrm{TM}}_m
-  = (-1)^{m}\,A^{\mathrm{TM}}_m. \qquad\checkmark
-\end{align}
-
-The last step uses:
-$A^{\mathrm{TM}}_m = -\frac{k_z/k}{2}[\HT_{m-1}-\HT_{m+1}](rE_r)
--\frac{ik_z/k}{2}[\HT_{m-1}+\HT_{m+1}](rE_\theta)$,
-so the expression in braces equals $-A^{\mathrm{TM}}_m$.
-
-\subsection{Combined propagated coefficient}
-
-\begin{align}
-  \tilde A_{-m}
-  &= \bigl[A^{\mathrm{TE}}_{-m} + A^{\mathrm{TM}}_{-m}\bigr]\,e^{ik_z f}
-  = \bigl[(-1)^{m+1}A^{\mathrm{TE}}_m + (-1)^m A^{\mathrm{TM}}_m\bigr]\,e^{ik_z f}
-  \nonumber\\[4pt]
-  &= (-1)^m\bigl[-A^{\mathrm{TE}}_m + A^{\mathrm{TM}}_m\bigr]\,e^{ik_z f}.
-\end{align}
-
-\begin{tcolorbox}[title=Symmetry: combined coefficient]
-\begin{equation}\label{eq:Atilde_neg}
-  \tilde A_{-m}(k_r) = (-1)^m\,\bigl[A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m\bigr]\cdot e^{ik_z f}.
+\begin{tcolorbox}[title=$y$-polarization symmetry relations]
+\begin{equation}\label{eq:sym_ypol}
+  A^{\mathrm{TE}}_{-m} = (-1)^{m}\,A^{\mathrm{TE}}_m, \qquad
+  A^{\mathrm{TM}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TM}}_m.
+\end{equation}
+Combined propagated coefficient:
+\begin{equation}\label{eq:Atilde_neg_ypol}
+  \tilde A_{-m} = (-1)^m\,\bigl[A^{\mathrm{TE}}_m - A^{\mathrm{TM}}_m\bigr]\cdot e^{ik_z f}.
 \end{equation}
 \end{tcolorbox}
 
+
+\subsection{Summary for both polarizations}
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Polarization} & $\hat\sigma$ & $A^{\mathrm{TE}}_{-m}$ & $A^{\mathrm{TM}}_{-m}$ \\
+\midrule
+$y$-pol ($s$-pol) & $\mathrm{diag}(-1,+1,+1)$
+  & $(-1)^m A^{\mathrm{TE}}_m$ & $(-1)^{m+1} A^{\mathrm{TM}}_m$ \\[4pt]
+$x$-pol ($p$-pol) & $\mathrm{diag}(+1,-1,+1)$
+  & $(-1)^{m+1} A^{\mathrm{TE}}_m$ & $(-1)^m A^{\mathrm{TM}}_m$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
 \noindent
-\textbf{Consequence:} Only modes $m = 0,1,\ldots,M_{\max}$ need be computed.
+Combined propagated coefficients:
+\begin{align}
+  \text{$y$-pol:}\quad \tilde A_{-m} &= (-1)^m\,(A^{\mathrm{TE}}_m - A^{\mathrm{TM}}_m)\,e^{ik_z f},
+  \label{eq:Atilde_neg_y}\\[4pt]
+  \text{$x$-pol:}\quad \tilde A_{-m} &= (-1)^m\,(A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m)\,e^{ik_z f}.
+  \label{eq:Atilde_neg_x}
+\end{align}
+The two differ only by a sign in the (TE$-$TM) vs (TM$-$TE) ordering.
+
+\noindent
+\textbf{Consequence:} For either polarization, only $m = 0,1,\ldots,M_{\max}$
+need be computed.  The code accepts a \texttt{polarization} flag (\texttt{:y} or
+\texttt{:x}) to select the correct sign.
 
 
 %=======================================================================

@@ -181,14 +181,20 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 """
-    propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f)
+    propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f; polarization=:y)
     -> (A_tilde, m_full)
+
+`polarization` selects the symmetry sign:
+- `:y` (s-pol, default): Ã_{-m} = (-1)^m (A^TE - A^TM) · prop
+- `:x` (p-pol):          Ã_{-m} = (-1)^m (A^TM - A^TE) · prop
 """
 function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
                                    A_TM::Matrix{ComplexF64},
                                    m_pos::Vector{Int},
                                    kr_grid::Vector{Float64},
-                                   k::Float64, f::Float64)
+                                   k::Float64, f::Float64;
+                                   polarization::Symbol = :y)
+    @assert polarization in (:x, :y) "polarization must be :x or :y"
     M_max = m_pos[end]
     Nkr   = length(kr_grid)
 
@@ -209,7 +215,12 @@ function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
         if m > 0
             idx_neg = -m + M_max + 1
             s = iseven(m) ? 1.0 : -1.0
-            A_tilde[:, idx_neg] .= s .* (atm .- ate) .* prop
+            # y-pol: Ã_{-m} = (-1)^m (A^TE - A^TM);  x-pol: (-1)^m (A^TM - A^TE)
+            if polarization == :y
+                A_tilde[:, idx_neg] .= s .* (ate .- atm) .* prop
+            else
+                A_tilde[:, idx_neg] .= s .* (atm .- ate) .* prop
+            end
         end
     end
 
@@ -361,7 +372,8 @@ end
 # §8  Internal shared pipeline  (Steps 2–6)
 # ═══════════════════════════════════════════════════════════════
 
-function _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
+function _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi;
+                   polarization::Symbol = :y)
     kr_max = 1.0 / r[1]
     if kr_max < k
         @warn "kr_max = 1/r_min = $(round(kr_max, sigdigits=4)) < k = $(round(k, sigdigits=4)). " *
@@ -370,7 +382,8 @@ function _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
     end
 
     A_TE, A_TM, kr_grid = compute_TE_TM_coeffs(Em_r, Em_theta, m_pos, r, k)
-    A_tilde, m_full = propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f)
+    A_tilde, m_full = propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f;
+                                                polarization=polarization)
     B = graf_shift_all_kr(A_tilde, m_full, kr_grid, x0, L_max)
     b = local_hankel_inverse(B, kr_grid, dln, L_max)
     rho_grid = exp.(log(1.0 / kr_grid[end]) .+ dln .* (0:length(kr_grid)-1))
@@ -397,7 +410,8 @@ function cyfft_farfield(Er::Matrix{ComplexF64},
                         k::Float64, alpha::Float64, f::Float64;
                         M_buffer::Int = 10,
                         L_max::Union{Int,Nothing} = nothing,
-                        Npsi::Int = 128)
+                        Npsi::Int = 128,
+                        polarization::Symbol = :y)
     R   = maximum(r)
     dln = log(r[2] / r[1])
     x0  = f * tan(alpha)
@@ -417,7 +431,8 @@ function cyfft_farfield(Er::Matrix{ComplexF64},
     end
 
     Em_r, Em_theta, m_pos = angular_decompose(Er, Etheta, M_max)
-    return _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi)
+    return _pipeline(Em_r, Em_theta, m_pos, r, k, f, x0, dln, L_max, Npsi;
+                     polarization=polarization)
 end
 
 
@@ -435,7 +450,8 @@ function cyfft_farfield_modal(Em_r_pos::Matrix{ComplexF64},
                                r::Vector{Float64},
                                k::Float64, alpha::Float64, f::Float64;
                                L_max::Union{Int,Nothing} = nothing,
-                               Npsi::Int = 128)
+                               Npsi::Int = 128,
+                               polarization::Symbol = :y)
     Nr, N_modes = size(Em_r_pos)
     @assert size(Em_theta_pos) == (Nr, N_modes)
 
@@ -458,7 +474,8 @@ function cyfft_farfield_modal(Em_r_pos::Matrix{ComplexF64},
               "Graf's theorem converges only for ρ < x0."
     end
 
-    return _pipeline(Em_r_pos, Em_theta_pos, m_pos, r, k, f, x0, dln, L_max, Npsi)
+    return _pipeline(Em_r_pos, Em_theta_pos, m_pos, r, k, f, x0, dln, L_max, Npsi;
+                     polarization=polarization)
 end
 
 
