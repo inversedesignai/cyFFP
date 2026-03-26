@@ -15,12 +15,16 @@
 \newcommand{\yhat}{\hat{y}}
 \newcommand{\HT}{\mathcal{H}}
 \newcommand{\E}{\mathbf{E}}
+\newcommand{\B}{\mathbf{B}}
 \newcommand{\J}{\mathbf{J}}
+\newcommand{\A}{\mathbf{A}}
+\newcommand{\F}{\mathbf{F}}
+\newcommand{\D}{\mathbf{D}}
+\renewcommand{\H}{\mathbf{H}}
+\newcommand{\bpsi}{\boldsymbol{\psi}}
 
 \title{Cylindrical Far-Field Propagation (CyFFP)\\[6pt]
-\large Complete Formulation: Vector Cylindrical Harmonics,\\
-FFTLog Hankel Transforms, Graf's Addition Theorem,\\
-and the Neumann Shift Theorem}
+\large Complete Formulation with Full Derivations}
 \author{Arvin Keshvari \quad (Supervisor: Dr.\ Zin Lin)}
 \date{March 2026}
 
@@ -30,131 +34,469 @@ and the Neumann Shift Theorem}
 \newpage
 
 %=======================================================================
-\section{Introduction and Problem Statement}
+\section{Introduction}
 %=======================================================================
 
-We compute the point spread function (PSF) of rotationally symmetric optical systems
-(metalenses, ideal lenses) at oblique incidence angles $\alpha$.
-The near field on a cylindrical monitor plane is decomposed into
-angular-momentum eigenmodes $e^{im\theta}$, propagated to the focal plane via
-vector cylindrical harmonics, and re-expanded in a local basis centered at the
-focal spot $(f\tan\alpha,\,0,\,f)$.
+We compute the point spread function (PSF) of rotationally symmetric optical
+systems at oblique incidence angle~$\alpha$.  The method:
+\begin{enumerate}[nosep]
+  \item Decomposes the near field into angular-momentum eigenmodes $e^{im\theta}$.
+  \item Projects each mode onto vector cylindrical harmonics (TE and TM).
+  \item Propagates each harmonic to the focal plane via the known $e^{ik_z z}$ phase.
+  \item Re-expands in a local cylindrical basis centered at the focal spot using
+        Graf's addition theorem.
+  \item Reconstructs the PSF by inverse Hankel transform and angular IFFT.
+\end{enumerate}
+The formulation is exact (no paraxial approximation).
 
-The formulation is \emph{exact} (no paraxial approximation) and handles arbitrarily
-large oblique angles, provided sufficient angular modes are retained.
 
 %=======================================================================
-\section{Vector Cylindrical Harmonics}
+\section{Preliminaries}
+\label{sec:prelim}
+%=======================================================================
+
+\subsection{Coordinate conventions}
+
+Cylindrical coordinates $(r,\theta,z)$ relate to Cartesian via
+$x = r\cos\theta$, $y = r\sin\theta$.
+The unit vectors satisfy
+\begin{equation}
+  \rhat = \cos\theta\,\xhat + \sin\theta\,\yhat,\qquad
+  \that = -\sin\theta\,\xhat + \cos\theta\,\yhat,
+\end{equation}
+and conversely $\xhat = \cos\theta\,\rhat - \sin\theta\,\that$,\;
+$\yhat = \sin\theta\,\rhat + \cos\theta\,\that$.
+
+\subsection{Near-field modal decomposition}
+
+The tangential electric field at $z=0$ is written
+\begin{equation}\label{eq:nearfield}
+  \E^{\mathrm{Near}}(r,\theta)
+  = \sum_m \E^{\mathrm{Near}}_m(r)\,e^{im\theta},
+  \qquad
+  \E^{\mathrm{Near}}_m(r) = E_{m,r}(r)\,\rhat + E_{m,\theta}(r)\,\that.
+\end{equation}
+The modal amplitudes are extracted by discrete Fourier transform over~$\theta$:
+\begin{equation}
+  E_{m,r/\theta}(r_j)
+  = \frac{1}{N_\theta}\sum_{l=0}^{N_\theta-1}
+    E_{r/\theta}(r_j,\theta_l)\,e^{-im\theta_l}.
+\end{equation}
+
+\subsection{Bessel recurrence relations}
+
+We use the NIST identities (DLMF \S10.6) throughout:
+\begin{align}
+  \frac{2m}{x}\,J_m(x) &= J_{m-1}(x) + J_{m+1}(x), \label{eq:rec1}\\[4pt]
+  2\,\frac{dJ_m(x)}{dx} &= J_{m-1}(x) - J_{m+1}(x), \label{eq:rec2}\\[4pt]
+  J_{-m}(x) &= (-1)^m\,J_m(x). \label{eq:negm}
+\end{align}
+Immediate consequences with $x = k_r r$:
+\begin{align}
+  \frac{m}{k_r r}\,J_m(k_r r) &= \tfrac{1}{2}\bigl[J_{m-1}(k_r r) + J_{m+1}(k_r r)\bigr],
+  \label{eq:moverx}\\[4pt]
+  \frac{\partial J_m(k_r r)}{\partial r}
+  &= \frac{k_r}{2}\bigl[J_{m-1}(k_r r) - J_{m+1}(k_r r)\bigr].
+  \label{eq:dJdr}
+\end{align}
+
+\subsection{Bessel orthogonality}
+
+\begin{equation}\label{eq:bessel_orth}
+  \int_0^\infty r\,J_m(k_r r)\,J_m(k_r' r)\,dr
+  = \frac{\delta(k_r - k_r')}{k_r}.
+\end{equation}
+
+
+%=======================================================================
+\section{Vector Cylindrical Harmonics from the Helmholtz Equation}
 \label{sec:harmonics}
 %=======================================================================
 
-\subsection{Near-field decomposition}
+\subsection{Scalar Helmholtz equation in cylindrical coordinates}
 
-The tangential electric field on the near-field plane $z = 0$ in cylindrical
-coordinates $(r,\theta)$ is
-\begin{equation}\label{eq:nearfield}
-  \E^{\mathrm{Near}}(r,\theta)
-  = \sum_m \bigl[E_{m,r}(r)\,\rhat + E_{m,\theta}(r)\,\that\bigr]\,e^{im\theta},
+In a source-free region, the electric and magnetic fields can be derived from
+scalar potentials satisfying the Helmholtz equation
+\begin{equation}\label{eq:helmholtz}
+  \nabla^2\psi + k^2\psi = 0,\qquad k = \frac{2\pi n}{\lambda} = \omega\sqrt{\mu\epsilon}.
 \end{equation}
-where the modal amplitudes are obtained by FFT over $\theta$:
+In cylindrical coordinates:
 \begin{equation}
-  E_{m,r/\theta}(r_j)
-  = \frac{1}{N_\theta}\sum_l E_{r/\theta}(r_j,\theta_l)\,e^{-im\theta_l}.
+  \frac{1}{r}\frac{\partial}{\partial r}\Bigl(r\frac{\partial\psi}{\partial r}\Bigr)
+  + \frac{1}{r^2}\frac{\partial^2\psi}{\partial\theta^2}
+  + \frac{\partial^2\psi}{\partial z^2}
+  + k^2\psi = 0.
+\end{equation}
+Separation of variables $\psi = R(r)\,\Theta(\theta)\,Z(z)$ gives:
+\begin{itemize}[nosep]
+  \item $Z'' = -k_z^2 Z$ \;$\Rightarrow$\; $Z = e^{\pm ik_z z}$,
+  \item $\Theta'' = -m^2\Theta$ \;$\Rightarrow$\; $\Theta = e^{im\theta}$,
+  \item $r(rR')' + (k_r^2 r^2 - m^2)R = 0$ \;$\Rightarrow$\; $R = J_m(k_r r)$,
+\end{itemize}
+where $k_r^2 + k_z^2 = k^2$.  The complete solution is
+\begin{equation}\label{eq:psi}
+  \psi = J_m(k_r r)\,e^{im\theta}\,e^{ik_z z}.
 \end{equation}
 
-\subsection{TE harmonics}
 
-From the Helmholtz equation in cylindrical coordinates, the TE electric eigenmode is
-\begin{equation}\label{eq:TE}
-  \E^{\mathrm{TE}}_{m,k_r}(r,\theta,z)
-  = -\Bigl[\rhat\,\frac{im}{r}\,J_m(k_r r)
-         - \that\,\frac{\partial J_m(k_r r)}{\partial r}\Bigr]
-    \,e^{im\theta}\,e^{ik_z z},
+\subsection{TM harmonics: derivation from $\bpsi = (0,0,\psi_z)$}
+\label{sec:TM_deriv}
+
+Set the vector potential $\A/\mu = \bpsi = (0,0,\psi_z)$ with $\psi_z = \psi$ from~\eqref{eq:psi}.
+
+\paragraph{Magnetic field.}
+$\H = \frac{1}{\mu}\nabla\times\A = \nabla\times\bpsi$:
+\begin{equation}
+  \H = \begin{pmatrix}
+    \frac{1}{r}\frac{\partial\psi}{\partial\theta}\\[4pt]
+    -\frac{\partial\psi}{\partial r}\\[4pt]
+    0
+  \end{pmatrix}
+  = \begin{pmatrix}
+    \frac{im}{r}\,J_m\\[4pt]
+    -k_r J_m'\\[4pt]
+    0
+  \end{pmatrix} e^{im\theta}\,e^{ik_z z},
 \end{equation}
-where $k_z = \sqrt{k^2 - k_r^2}$ and $k = 2\pi/\lambda$.
+where $J_m' \equiv dJ_m(k_r r)/d(k_r r)$.  Note $H_z = 0$ (TM condition).
 
-\subsection{TM harmonics}
-
-The tangential part of the TM electric eigenmode is
-\begin{equation}\label{eq:TM}
-  \E^{\mathrm{TM},\perp}_{m,k_r}
-  = -\frac{k_z}{k}\,\frac{\partial J_m}{\partial r}\,\rhat
-    \;-\; i\,\frac{m k_z}{k\, r}\,J_m(k_r r)\,\that.
-\end{equation}
-
-\subsection{Bessel recurrence identities}
-
-The NIST recurrence relations (used throughout):
+\paragraph{Electric field.}
+From $\nabla\times\H = -i\omega\epsilon\,\E$, so $\E = \frac{1}{i\omega\epsilon}\nabla\times\H$:
 \begin{align}
-  J_{m+1}(x) + J_{m-1}(x) &= \frac{2m}{x}\,J_m(x), \label{eq:rec1}\\
-  J_{m-1}(x) - J_{m+1}(x) &= 2\,\frac{dJ_m(x)}{dx}, \label{eq:rec2}\\
-  J_{-m}(x) &= (-1)^m\,J_m(x). \label{eq:negm}
+  E_r &= \frac{1}{i\omega\epsilon}\Bigl(-\frac{\partial H_\theta}{\partial z}\Bigr)
+       = \frac{1}{i\omega\epsilon}(ik_z)\,k_r J_m'
+       = -\frac{k_z}{\omega\epsilon}\,k_r J_m', \label{eq:TM_Er}\\[4pt]
+  E_\theta &= \frac{1}{i\omega\epsilon}\frac{\partial H_r}{\partial z}
+            = \frac{1}{i\omega\epsilon}(ik_z)\frac{im}{r}J_m
+            = -\frac{mk_z}{\omega\epsilon\, r}\,J_m, \label{eq:TM_Eth}\\[4pt]
+  E_z &= \frac{1}{i\omega\epsilon}\frac{1}{r}\Bigl[\frac{\partial(rH_\theta)}{\partial r}
+          - \frac{\partial H_r}{\partial\theta}\Bigr].
+\end{align}
+Using $\omega\epsilon = k\sqrt{\epsilon/\mu} = k/\eta$ (where $\eta = \sqrt{\mu/\epsilon}$),
+and $k_r J_m'(k_r r) = \frac{\partial J_m(k_r r)}{\partial r}$:
+\begin{equation}\label{eq:ETM_tang}
+\boxed{
+  \E^{\mathrm{TM},\perp}_{m,k_r}
+  = \eta\Bigl[
+    -\frac{k_z}{k}\,\frac{\partial J_m(k_r r)}{\partial r}\,\rhat
+    \;-\; i\,\frac{m\,k_z}{k\,r}\,J_m(k_r r)\,\that
+  \Bigr]\,e^{im\theta}\,e^{ik_z z}.
+}
+\end{equation}
+(We will absorb $\eta$ into the expansion coefficients and drop it hereafter.)
+
+
+\subsection{TE harmonics: derivation from $\F/\epsilon = \bpsi$}
+\label{sec:TE_deriv}
+
+Set $\F/\epsilon = \bpsi = (0,0,\psi_z)$.  Then $\D = \nabla\times\F$ and
+$\E = -\frac{1}{\epsilon}\D = -\nabla\times\bpsi$:
+\begin{equation}\label{eq:ETE}
+  \E^{\mathrm{TE}}_{m,k_r}
+  = -\begin{pmatrix}
+    \frac{1}{r}\frac{\partial\psi}{\partial\theta}\\[4pt]
+    -\frac{\partial\psi}{\partial r}\\[4pt]
+    0
+  \end{pmatrix}
+  = \begin{pmatrix}
+    -\frac{im}{r}\,J_m(k_r r)\\[4pt]
+    \frac{\partial J_m(k_r r)}{\partial r}\\[4pt]
+    0
+  \end{pmatrix} e^{im\theta}\,e^{ik_z z}.
+\end{equation}
+Note $E_z = 0$ (TE condition, electric field purely tangential).
+
+\begin{equation}\label{eq:ETE_tang}
+\boxed{
+  \E^{\mathrm{TE},\perp}_{m,k_r}
+  = \Bigl[
+    -\frac{im}{r}\,J_m(k_r r)\,\rhat
+    + \frac{\partial J_m(k_r r)}{\partial r}\,\that
+  \Bigr]\,e^{im\theta}\,e^{ik_z z}.
+}
+\end{equation}
+
+
+%=======================================================================
+\section{TE Expansion Coefficient: Full Derivation}
+\label{sec:TE_coeff}
+%=======================================================================
+
+The near field is expanded as
+\begin{equation}
+  \E^{\mathrm{Near}}(r,\theta) = \sum_m\int dk_r\,
+  \bigl[A^{\mathrm{TE}}_m(k_r)\,\E^{\mathrm{TE}}_{m,k_r}(r,\theta,0)
+  + A^{\mathrm{TM}}_m(k_r)\,\E^{\mathrm{TM}}_{m,k_r}(r,\theta,0)\bigr].
+\end{equation}
+To extract $A^{\mathrm{TE}}_m$, project onto $\E^{\mathrm{TE}*}_{m,k_r'}$
+and integrate over $r$ and $\theta$.  The $\theta$-integral selects $m'=m$;
+TE--TM orthogonality kills the TM cross-term.
+
+\subsection{TE--TE inner product}
+
+From~\eqref{eq:ETE_tang} at $z=0$:
+\begin{align}
+  \E^{\mathrm{TE}}_{m,k_r}\cdot\E^{\mathrm{TE}*}_{m,k_r'}
+  &= \frac{m^2}{r^2}\,J_m(k_r r)\,J_m(k_r' r)
+   + \frac{\partial J_m(k_r r)}{\partial r}\,\frac{\partial J_m(k_r' r)}{\partial r}.
+\end{align}
+Substitute~\eqref{eq:moverx} and~\eqref{eq:dJdr}:
+\begin{align}
+  \frac{m^2}{r^2}\,J_m J_m'
+  &= \frac{k_r k_r'}{4}\,(J_{m-1}+J_{m+1})(J_{m-1}'+J_{m+1}'),\\[4pt]
+  \frac{\partial J_m}{\partial r}\frac{\partial J_m'}{\partial r}
+  &= \frac{k_r k_r'}{4}\,(J_{m-1}-J_{m+1})(J_{m-1}'-J_{m+1}'),
+\end{align}
+where unprimed/primed $J$ have arguments $k_r r$ and $k_r' r$ respectively.
+Adding, cross terms cancel:
+\begin{equation}\label{eq:TETE}
+  \E^{\mathrm{TE}}_{m,k_r}\cdot\E^{\mathrm{TE}*}_{m,k_r'}
+  = \frac{k_r k_r'}{2}\bigl[
+    J_{m+1}(k_r r)\,J_{m+1}(k_r' r) + J_{m-1}(k_r r)\,J_{m-1}(k_r' r)
+  \bigr].
+\end{equation}
+
+\subsection{Radial integration and orthogonality}
+
+Using~\eqref{eq:bessel_orth}:
+\begin{align}
+  \int_0^\infty r\;\E^{\mathrm{TE}}_{m,k_r}\cdot\E^{\mathrm{TE}*}_{m,k_r'}\;dr
+  &= \frac{k_r k_r'}{2}\Bigl[
+    \frac{\delta(k_r-k_r')}{k_r} + \frac{\delta(k_r-k_r')}{k_r}
+  \Bigr]
+  = k_r'\,\delta(k_r-k_r').
+\end{align}
+Therefore the full projection gives
+\begin{equation}
+  \int_0^\infty\!\!\int_0^{2\pi}
+  \E^{\mathrm{Near}}\cdot\E^{\mathrm{TE}*}_{m,k_r'}\;r\,dr\,d\theta
+  = 2\pi\, k_r'\, A^{\mathrm{TE}}_m(k_r').
+\end{equation}
+
+\subsection{Extracting the coefficient}
+
+\begin{equation}
+  A^{\mathrm{TE}}_m(k_r) = \frac{1}{k_r}\int_0^\infty
+  \E^{\mathrm{Near}}_m(r)\cdot\E^{\mathrm{TE}*}_{m,k_r}(r)\;r\,dr.
+\end{equation}
+Now $\E^{\mathrm{TE}*}_{m,k_r}(r) = \bigl[\frac{im}{r}J_m\,\rhat + \frac{\partial J_m}{\partial r}\,\that\bigr]$
+(conjugate of~\eqref{eq:ETE_tang} with real $J_m$, flipping $-im/r \to +im/r$).
+
+Expand the dot product:
+\begin{equation}
+  \E^{\mathrm{Near}}_m\cdot\E^{\mathrm{TE}*}_{m,k_r}
+  = E_{m,r}\cdot\frac{im}{r}J_m + E_{m,\theta}\cdot\frac{\partial J_m}{\partial r}.
+\end{equation}
+
+Therefore:
+\begin{equation}\label{eq:ATE_raw}
+  A^{\mathrm{TE}}_m(k_r)
+  = \int_0^\infty\Bigl[
+    \frac{im}{k_r r}\,J_m(k_r r)\,E_{m,r}(r)
+    + \frac{1}{k_r}\frac{\partial J_m(k_r r)}{\partial r}\,E_{m,\theta}(r)
+  \Bigr]\,r\,dr.
+\end{equation}
+
+\subsection{Substituting recurrences}
+
+Using~\eqref{eq:moverx}: $\;\displaystyle\frac{im}{k_r r}J_m = \frac{i}{2}(J_{m-1}+J_{m+1})$.
+
+Using~\eqref{eq:dJdr}: $\;\displaystyle\frac{1}{k_r}\frac{\partial J_m}{\partial r} = \frac{1}{2}(J_{m-1}-J_{m+1})$.
+
+Substituting into~\eqref{eq:ATE_raw}:
+\begin{align}
+  A^{\mathrm{TE}}_m(k_r)
+  &= \int_0^\infty\Bigl\{
+    E_{m,r}\cdot\frac{i}{2}\bigl[J_{m+1}+J_{m-1}\bigr]
+    + E_{m,\theta}\cdot\frac{1}{2}\bigl[J_{m-1}-J_{m+1}\bigr]
+  \Bigr\}\,r\,dr \nonumber\\[6pt]
+  &= \frac{i}{2}\int_0^\infty r\,E_{m,r}\,\bigl[J_{m+1}(k_r r)+J_{m-1}(k_r r)\bigr]\,dr
+  \nonumber\\
+  &\quad+ \frac{1}{2}\int_0^\infty r\,E_{m,\theta}\,\bigl[J_{m-1}(k_r r)-J_{m+1}(k_r r)\bigr]\,dr.
 \end{align}
 
+Recognizing each integral as a Hankel transform $\HT_\nu[f](k_r) = \int_0^\infty f(r)\,J_\nu(k_r r)\,dr$:
 
-%=======================================================================
-\section{TE and TM Expansion Coefficients}
-\label{sec:coeffs}
-%=======================================================================
-
-Projecting the near field onto the TE/TM eigenmodes and using the orthogonality
-of Bessel functions $\int_0^\infty r\,J_m(k_r r)\,J_m(k_r' r)\,dr = \delta(k_r - k_r')/k_r$,
-we obtain:
-
-\begin{tcolorbox}[title=TE coefficient]
+\begin{tcolorbox}[title=TE coefficient (final)]
 \begin{equation}\label{eq:ATE}
   A^{\mathrm{TE}}_m(k_r)
   = \frac{i}{2}\bigl[\HT_{m+1}[r\,E_{m,r}] + \HT_{m-1}[r\,E_{m,r}]\bigr]
-  + \frac{1}{2}\bigl[\HT_{m-1}[r\,E_{m,\theta}] - \HT_{m+1}[r\,E_{m,\theta}]\bigr]
+  + \frac{1}{2}\bigl[\HT_{m-1}[r\,E_{m,\theta}] - \HT_{m+1}[r\,E_{m,\theta}]\bigr].
 \end{equation}
 \end{tcolorbox}
 
-\begin{tcolorbox}[title=TM coefficient]
+
+%=======================================================================
+\section{TM Expansion Coefficient: Full Derivation}
+\label{sec:TM_coeff}
+%=======================================================================
+
+The derivation parallels the TE case.  The TM tangential field
+from~\eqref{eq:ETM_tang} at $z=0$ (dropping $\eta$) is
+\begin{equation}
+  \E^{\mathrm{TM},\perp}_{m,k_r}
+  = -\frac{k_z}{k}\,\frac{\partial J_m}{\partial r}\,\rhat
+  - i\frac{mk_z}{kr}\,J_m\,\that.
+\end{equation}
+
+\subsection{TM--TM inner product}
+
+Following the same steps as \S\ref{sec:TE_coeff}:
+\begin{align}
+  \E^{\mathrm{TM}}_{m,k_r}\cdot\E^{\mathrm{TM}*}_{m,k_r'}
+  &= \frac{k_z k_z'}{k^2}\Bigl[
+    \frac{\partial J_m(k_r r)}{\partial r}\frac{\partial J_m(k_r' r)}{\partial r}
+    + \frac{m^2}{r^2}J_m(k_r r)J_m(k_r' r)
+  \Bigr] \nonumber\\
+  &= \frac{k_z k_z'}{k^2}\cdot\frac{k_r k_r'}{2}
+    \bigl[J_{m+1}J_{m+1}' + J_{m-1}J_{m-1}'\bigr],
+\end{align}
+which gives the same orthogonality structure (with an extra $k_z^2/k^2$ factor
+absorbed into the coefficient normalization).
+
+\subsection{Extracting the coefficient}
+
+The conjugate $\E^{\mathrm{TM}*}$ flips $-i\to+i$ in the $\that$-component.
+The dot product with the near field gives:
+\begin{equation}
+  \E^{\mathrm{Near}}_m\cdot\E^{\mathrm{TM}*}
+  = -\frac{k_z}{k}\frac{\partial J_m}{\partial r}\,E_{m,r}
+  + i\frac{mk_z}{kr}\,J_m\,E_{m,\theta}.
+\end{equation}
+
+After the normalization integral and substituting~\eqref{eq:moverx}--\eqref{eq:dJdr}:
+\begin{align}
+  A^{\mathrm{TM}}_m(k_r)
+  &= -\frac{k_z/k}{2}\int_0^\infty r\,E_{m,r}\,
+    \bigl[J_{m-1}(k_r r) - J_{m+1}(k_r r)\bigr]\,dr \nonumber\\
+  &\quad -\frac{ik_z/k}{2}\int_0^\infty r\,E_{m,\theta}\,
+    \bigl[J_{m-1}(k_r r) + J_{m+1}(k_r r)\bigr]\,dr.
+\end{align}
+
+\begin{tcolorbox}[title=TM coefficient (final)]
 \begin{equation}\label{eq:ATM}
   A^{\mathrm{TM}}_m(k_r)
-  = -\frac{k_z/k}{2}\bigl[\HT_{m-1}[r\,E_{m,r}] - \HT_{m+1}[r\,E_{m,r}]\bigr]
-  - \frac{i\,k_z/k}{2}\bigl[\HT_{m-1}[r\,E_{m,\theta}] + \HT_{m+1}[r\,E_{m,\theta}]\bigr]
+  = -\frac{k_z/k}{2}\bigl[\HT_{m-1}[rE_{m,r}] - \HT_{m+1}[rE_{m,r}]\bigr]
+  - \frac{ik_z/k}{2}\bigl[\HT_{m-1}[rE_{m,\theta}] + \HT_{m+1}[rE_{m,\theta}]\bigr].
 \end{equation}
 \end{tcolorbox}
 
 \noindent
-where $\HT_\nu[f](k_r) = \int_0^\infty f(r)\,J_\nu(k_r r)\,dr$ is the order-$\nu$
-Hankel transform with the plain $dr$ measure.  Each mode~$m$ requires
-\textbf{4~FFTLog calls} (2 if $E_{m,\theta} = 0$).
+Note $k_z/k = \sqrt{1-(k_r/k)^2}$ depends on $k_r$ and must be applied pointwise.
 
-The mode truncation is $|m| \le M_{\max} = \lceil k\sin\alpha\cdot R\rceil + \delta M$,
-determined by the Bessel decay $J_m(x) \approx 0$ for $m \gg x$.
+\paragraph{Mode count.}
+Each mode~$m$ requires \textbf{4 Hankel transforms}: $\HT_{m\pm 1}$ applied to
+$r E_{m,r}$ and $r E_{m,\theta}$.
+When $E_{m,\theta}\equiv 0$ (scalar-like field), only \textbf{2 transforms} are needed.
+
+\paragraph{Mode truncation.}
+$|m| \le M_{\max} = \lceil k\sin\alpha\cdot R\rceil + \delta M$,
+determined by $J_m(k\sin\alpha\cdot R) \approx 0$ for $m \gg k\sin\alpha\cdot R$.
 
 
 %=======================================================================
-\section{Negative-$m$ Symmetry}
+\section{Negative-$m$ Symmetry: Full Proof}
 \label{sec:symmetry}
 %=======================================================================
 
-For $x$-polarized illumination ($\varphi = 0$) of an axisymmetric structure, the
-source current satisfies $\J_{-m} = \hat\sigma\,\J_m$ with
-$\hat\sigma = \mathrm{diag}(1,-1,1)$.  Maxwell's equations then give
-\begin{equation}\label{eq:sym}
-  E_{-m,r} = E_{m,r}, \qquad E_{-m,\theta} = -E_{m,\theta}.
-\end{equation}
-Substituting into~\eqref{eq:ATE}--\eqref{eq:ATM} and using
-$\HT_{-\nu}[f] = (-1)^\nu\,\HT_\nu[f]$ (from $J_{-\nu}(x)=(-1)^\nu J_\nu(x)$):
+\subsection{Source symmetry}
 
-\begin{tcolorbox}[title=Symmetry relations]
-\begin{equation}\label{eq:symTE}
-  A^{\mathrm{TE}}_{-m} = (-1)^{m+1}\,A^{\mathrm{TE}}_m, \qquad
-  A^{\mathrm{TM}}_{-m} = (-1)^{m}\,A^{\mathrm{TM}}_m.
+For $x$-polarized illumination ($\varphi=0$) of an axisymmetric structure,
+the source current modes satisfy (proof in Appendix of cyFFP0):
+\begin{equation}
+  \J_{-m} = \hat\sigma\,\J_m,\qquad
+  \hat\sigma = \begin{pmatrix}1&0&0\\0&-1&0\\0&0&1\end{pmatrix}.
+\end{equation}
+Since $\hat\sigma\mathcal{D}_{-m}\mathcal{D}_{-m}\hat\sigma = \mathcal{D}_m\mathcal{D}_m$
+(verified by direct computation of the curl-curl operator), the solution inherits:
+\begin{equation}\label{eq:Esym}
+  \E_{-m} = \hat\sigma\,\E_m
+  \quad\Longrightarrow\quad
+  E_{-m,r} = E_{m,r},\;\; E_{-m,\theta} = -E_{m,\theta}.
+\end{equation}
+
+\subsection{Hankel transform under order negation}
+
+For any function $f(r)$:
+\begin{equation}\label{eq:HT_neg}
+  \HT_{-\nu}[f](k_r) = \int_0^\infty f(r)\,J_{-\nu}(k_r r)\,dr
+  = (-1)^\nu\int_0^\infty f(r)\,J_\nu(k_r r)\,dr
+  = (-1)^\nu\,\HT_\nu[f](k_r),
+\end{equation}
+using~\eqref{eq:negm}.  In particular:
+\begin{equation}\label{eq:HT_neg_specific}
+  \HT_{-m+1}[f] = (-1)^{m-1}\HT_{m-1}[f] = (-1)^{m+1}\HT_{m-1}[f],\qquad
+  \HT_{-m-1}[f] = (-1)^{m+1}\HT_{m+1}[f].
+\end{equation}
+
+\subsection{TE symmetry: $A^{\mathrm{TE}}_{-m} = (-1)^{m+1}A^{\mathrm{TE}}_m$}
+
+Substitute $E_{-m,r} = E_{m,r}$, $E_{-m,\theta} = -E_{m,\theta}$
+into~\eqref{eq:ATE} for mode $-m$:
+\begin{align}
+  A^{\mathrm{TE}}_{-m}
+  &= \frac{i}{2}\bigl[\HT_{-m+1}[rE_{m,r}] + \HT_{-m-1}[rE_{m,r}]\bigr]
+   + \frac{1}{2}\bigl[\HT_{-m-1}[-rE_{m,\theta}] - \HT_{-m+1}[-rE_{m,\theta}]\bigr]
+  \nonumber\\[4pt]
+  &= \frac{i}{2}\bigl[(-1)^{m+1}\HT_{m-1}[rE_{m,r}] + (-1)^{m+1}\HT_{m+1}[rE_{m,r}]\bigr]
+  \nonumber\\
+  &\quad -\frac{1}{2}\bigl[(-1)^{m+1}\HT_{m+1}[rE_{m,\theta}]
+         - (-1)^{m+1}\HT_{m-1}[rE_{m,\theta}]\bigr]
+  \nonumber\\[4pt]
+  &= (-1)^{m+1}\Bigl\{
+    \frac{i}{2}\bigl[\HT_{m+1}[rE_{m,r}]+\HT_{m-1}[rE_{m,r}]\bigr]
+    +\frac{1}{2}\bigl[\HT_{m-1}[rE_{m,\theta}]-\HT_{m+1}[rE_{m,\theta}]\bigr]
+  \Bigr\}
+  \nonumber\\[4pt]
+  &= (-1)^{m+1}\,A^{\mathrm{TE}}_m. \qquad\checkmark
+\end{align}
+
+\subsection{TM symmetry: $A^{\mathrm{TM}}_{-m} = (-1)^{m}A^{\mathrm{TM}}_m$}
+
+Substitute into~\eqref{eq:ATM} for mode $-m$:
+\begin{align}
+  A^{\mathrm{TM}}_{-m}
+  &= -\frac{k_z/k}{2}\bigl[\HT_{-m-1}[rE_{m,r}] - \HT_{-m+1}[rE_{m,r}]\bigr]
+     + \frac{ik_z/k}{2}\bigl[\HT_{-m-1}[rE_{m,\theta}] + \HT_{-m+1}[rE_{m,\theta}]\bigr]
+  \nonumber\\[4pt]
+  &\quad\text{(note $+$ sign on $\theta$-term because $E_{-m,\theta}=-E_{m,\theta}$)}
+  \nonumber\\[4pt]
+  &= -\frac{k_z/k}{2}\bigl[(-1)^{m+1}\HT_{m+1}[rE_{m,r}]-(-1)^{m+1}\HT_{m-1}[rE_{m,r}]\bigr]
+  \nonumber\\
+  &\quad +\frac{ik_z/k}{2}\bigl[(-1)^{m+1}\HT_{m+1}[rE_{m,\theta}]+(-1)^{m+1}\HT_{m-1}[rE_{m,\theta}]\bigr]
+  \nonumber\\[4pt]
+  &= (-1)^{m+1}\Bigl\{
+    \frac{k_z/k}{2}\bigl[\HT_{m-1}[rE_{m,r}]-\HT_{m+1}[rE_{m,r}]\bigr]
+    +\frac{ik_z/k}{2}\bigl[\HT_{m-1}[rE_{m,\theta}]+\HT_{m+1}[rE_{m,\theta}]\bigr]
+  \Bigr\}
+  \nonumber\\[4pt]
+  &= (-1)^{m+1}\cdot(-1)\cdot A^{\mathrm{TM}}_m
+  = (-1)^{m}\,A^{\mathrm{TM}}_m. \qquad\checkmark
+\end{align}
+
+The last step uses:
+$A^{\mathrm{TM}}_m = -\frac{k_z/k}{2}[\HT_{m-1}-\HT_{m+1}](rE_r)
+-\frac{ik_z/k}{2}[\HT_{m-1}+\HT_{m+1}](rE_\theta)$,
+so the expression in braces equals $-A^{\mathrm{TM}}_m$.
+
+\subsection{Combined propagated coefficient}
+
+\begin{align}
+  \tilde A_{-m}
+  &= \bigl[A^{\mathrm{TE}}_{-m} + A^{\mathrm{TM}}_{-m}\bigr]\,e^{ik_z f}
+  = \bigl[(-1)^{m+1}A^{\mathrm{TE}}_m + (-1)^m A^{\mathrm{TM}}_m\bigr]\,e^{ik_z f}
+  \nonumber\\[4pt]
+  &= (-1)^m\bigl[-A^{\mathrm{TE}}_m + A^{\mathrm{TM}}_m\bigr]\,e^{ik_z f}.
+\end{align}
+
+\begin{tcolorbox}[title=Symmetry: combined coefficient]
+\begin{equation}\label{eq:Atilde_neg}
+  \tilde A_{-m}(k_r) = (-1)^m\,\bigl[A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m\bigr]\cdot e^{ik_z f}.
 \end{equation}
 \end{tcolorbox}
 
 \noindent
-Combined propagated coefficient:
-\begin{equation}\label{eq:Atilde_neg}
-  \tilde A_{-m}(k_r) = (-1)^m\bigl[A^{\mathrm{TM}}_m(k_r) - A^{\mathrm{TE}}_m(k_r)\bigr]\cdot e^{ik_z f}.
-\end{equation}
-
-\textbf{Consequence:} Only $m = 0,1,\ldots,M_{\max}$ need be computed; negative modes
-are reconstructed algebraically.  FDTD/RCWA simulations need only run for $m \ge 0$.
+\textbf{Consequence:} Only modes $m = 0,1,\ldots,M_{\max}$ need be computed.
 
 
 %=======================================================================
@@ -162,31 +504,66 @@ are reconstructed algebraically.  FDTD/RCWA simulations need only run for $m \ge
 \label{sec:fftlog}
 %=======================================================================
 
-FFTLog (Talman 1978; Hamilton 2000) computes $\HT_\nu[f](k_r)$ for \emph{any}
-real order~$\nu$ by a log-variable change $r = r_0 e^{-\rho}$,
-$k_r = k_0 e^{\kappa}$, converting the Hankel integral into a convolution
-evaluated by FFT.  The filter kernel in Fourier space is
-\begin{equation}\label{eq:fftlog_kernel}
-  \hat{\tilde J}_\nu(q)
-  = \frac{\Gamma\!\bigl(\tfrac{\nu+1+q}{2}\bigr)}
-         {\Gamma\!\bigl(\tfrac{\nu+1-q}{2}\bigr)}\,2^q,
-\end{equation}
-computed via \texttt{loggamma} for overflow-free evaluation at $|\nu| \sim 600$.
+\subsection{Log-variable substitution}
 
-\textbf{There is no turning-point problem:} FFTLog is order-agnostic, unlike
-asymptotic methods (e.g.\ Beckman--O'Neil NUFHT) which break down at
-$k_r r \approx |m|$.
+The Hankel transform $A(k_r) = \int_0^\infty f(r)\,J_\nu(k_r r)\,dr$
+is converted to a convolution by the substitution $r = r_0\,e^t$,
+$k_r = k_0\,e^s$, $r_0 k_0 = 1$:
+\begin{align}
+  A(e^s/r_0)
+  &= \int_{-\infty}^{\infty} f(r_0 e^t)\,J_\nu(e^{s+t})\,r_0\,e^t\,dt
+  = \int_{-\infty}^{\infty} g(t)\,K_\nu(s+t)\,dt,
+\end{align}
+where $g(t) = r_0\,e^t\,f(r_0 e^t)$ and $K_\nu(\tau) = J_\nu(e^\tau)$.
+This is a convolution $A = g * K_\nu$, so in Fourier space:
+\begin{equation}
+  \hat A(q) = \hat g(q)\cdot\hat K_\nu(q).
+\end{equation}
+
+\subsection{The filter kernel}
+
+The Fourier transform of $K_\nu(\tau) = J_\nu(e^\tau)$ is (Talman 1978):
+\begin{equation}\label{eq:kernel}
+  \hat K_\nu(q)
+  = \frac{\Gamma\!\bigl(\frac{\nu+1+iq}{2}\bigr)}
+         {\Gamma\!\bigl(\frac{\nu+1-iq}{2}\bigr)}\,2^{iq}.
+\end{equation}
+For real $q$ this extends analytically to any real~$\nu$, including $|\nu| \sim 600$.
+The implementation uses
+\begin{equation}
+  \hat K_\nu(q) = \exp\bigl[
+    \mathrm{loggamma}\!\bigl(\tfrac{\nu+1+iq}{2}\bigr)
+    - \mathrm{loggamma}\!\bigl(\tfrac{\nu+1-iq}{2}\bigr)
+    + iq\log 2
+  \bigr],
+\end{equation}
+which avoids overflow at large $|\nu|$.
+
+\subsection{Discrete implementation}
+
+On a log-spaced grid $r_j = r_0\,e^{j\,\Delta\!\ln}$, $j=0,\ldots,N-1$:
+\begin{enumerate}[nosep]
+  \item FFT the sampled input: $\hat g[n] = \mathrm{FFT}\{f_r[j]\}$.
+  \item Multiply by the kernel: $\hat A[n] = \hat g[n]\cdot\hat K_\nu(q_n)$,
+        where $q_n = \frac{2\pi}{N\,\Delta\!\ln}\,n$ with FFTW-ordered indices.
+  \item IFFT: $A[j] = \mathrm{IFFT}\{\hat A[n]\}$.
+\end{enumerate}
+The output lives on the reciprocal log-grid $k_r^{(j)} = (1/r_{N-1})\,e^{j\,\Delta\!\ln}$,
+so $k_r^{\max} = 1/r_{\min}$.
 
 \paragraph{Grid constraint.}
-The input must be on a log-spaced grid $r_j = r_0\,e^{j\,\Delta\ln}$.
-The output lives on the reciprocal log-grid with
-$k_r^{\max} = 1/r_{\min}$.  Therefore
+To capture all propagating modes ($k_r \le k$), we need
+$k_r^{\max} = 1/r_{\min} \ge k$, i.e.\
 \begin{equation}
-  r_{\min} \;\le\; \frac{1}{k} = \frac{\lambda}{2\pi}
+  \boxed{r_{\min} \le \frac{1}{k} = \frac{\lambda}{2\pi}.}
 \end{equation}
-is \textbf{required} to capture all propagating modes.  For a 2\,mm lens at
-$\lambda = 500$\,nm this gives $r_{\min} \le 80$\,nm and
-$N_r \sim 2^{17} = 131072$.
+
+\paragraph{Comparison with NUFHT.}
+Asymptotic Hankel transform methods (Beckman--O'Neil) decompose $J_\nu(x)$ into
+oscillatory and decaying parts, using different quadrature for each.  Near the
+turning point $x \approx \nu$, neither asymptotic works; accuracy degrades as
+$\sim\nu^{-1/3}$.  FFTLog has no such issue: the kernel~\eqref{eq:kernel} is
+well-behaved for all~$\nu$.
 
 
 %=======================================================================
@@ -194,161 +571,246 @@ $N_r \sim 2^{17} = 131072$.
 \label{sec:propagation}
 %=======================================================================
 
-Combine TE and TM, apply the propagation phase:
+At $z = f$, each eigenmode acquires the phase $e^{ik_z z}$.  Combining TE+TM:
 \begin{equation}\label{eq:prop}
   \tilde A_m(k_r)
-  = \bigl[A^{\mathrm{TE}}_m(k_r) + A^{\mathrm{TM}}_m(k_r)\bigr]\,e^{ik_z(k_r)\,f},
-  \quad k_z = \sqrt{k^2 - k_r^2}.
+  = \bigl[A^{\mathrm{TE}}_m(k_r) + A^{\mathrm{TM}}_m(k_r)\bigr]\,e^{ik_z f},
+  \qquad k_z = \sqrt{k^2 - k_r^2}.
 \end{equation}
-Evanescent modes ($k_r > k$, imaginary $k_z$) are set to zero.
+Evanescent modes ($k_r > k \Rightarrow k_z$ imaginary) are set to zero.
 
 
 %=======================================================================
-\section{Graf's Addition Theorem: Local-Basis Shift}
+\section{Graf's Addition Theorem: Full Derivation}
 \label{sec:graf}
 %=======================================================================
 
-\subsection{The theorem}
+\subsection{Statement of the theorem}
 
-For a shift $\bm{x}_0 = (x_0, 0)$ with $x_0 = f\tan\alpha$, define local polar
-coordinates $(\rho,\psi)$ by $x = x_0 + \rho\cos\psi$, $y = \rho\sin\psi$.
-Graf's addition theorem states:
+Define $x_0 = f\tan\alpha$ and local coordinates
+$x = x_0+\rho\cos\psi$, $y = \rho\sin\psi$.
+Graf's addition theorem (DLMF \S10.23.7) states that for $\rho < x_0$:
 \begin{equation}\label{eq:graf}
   J_n(k_r r)\,e^{in\theta}
-  = \sum_{m=-\infty}^{\infty} J_m(k_r x_0)\,J_{n-m}(k_r\rho)\,e^{i(n-m)\psi},
-  \qquad \rho < x_0.
+  = \sum_{m=-\infty}^{\infty} J_m(k_r x_0)\,J_{n-m}(k_r\rho)\,e^{i(n-m)\psi}.
 \end{equation}
 
-\subsection{Local modal coefficients}
+\subsection{Substitution into the far-field sum}
 
-Substituting~\eqref{eq:graf} into the far-field sum and relabelling $l = n - m$:
-\begin{tcolorbox}[title=Graf shift (mode convolution)]
+The far field at $z=f$ in the global frame is
+\begin{equation}
+  E(r,\theta,f) = \sum_n\Bigl[\int_0^k \tilde A_n(k_r)\,J_n(k_r r)\,k_r\,dk_r\Bigr]e^{in\theta}.
+\end{equation}
+Insert~\eqref{eq:graf}:
+\begin{align}
+  E(\rho,\psi,f)
+  &= \sum_n\int_0^k \tilde A_n(k_r)\sum_m J_m(k_r x_0)\,J_{n-m}(k_r\rho)\,e^{i(n-m)\psi}\,k_r\,dk_r.
+\end{align}
+Relabel $l = n - m$ (so $n = m + l$):
+\begin{align}
+  E(\rho,\psi,f)
+  &= \sum_l\Bigl[\int_0^k
+    \underbrace{\sum_m \tilde A_{m+l}(k_r)\,J_m(k_r x_0)}_{B_l(k_r)}
+    \,J_l(k_r\rho)\,k_r\,dk_r\Bigr]\,e^{il\psi}.
+\end{align}
+
+\begin{tcolorbox}[title=Local modal coefficients (Graf shift)]
 \begin{equation}\label{eq:Bl}
-  B_l(k_r)
-  = \sum_{|m|\le M_{\max}} \tilde A_{m+l}(k_r)\,J_m(k_r\,x_0),
+  B_l(k_r) = \sum_{|m|\le M_{\max}} \tilde A_{m+l}(k_r)\,J_m(k_r x_0),
   \qquad |l| \le L_{\max}.
 \end{equation}
 \end{tcolorbox}
 
-\noindent
-This is a discrete convolution in mode index at each $k_r$.
-The weight $J_m(k_r x_0)$ decays exponentially for $|m| > k_r x_0$,
-so the effective sum length is $\min(M_{\max},\,\lceil k_r x_0\rceil + 20)$.
+\paragraph{Truncation.}
+$J_m(k_r x_0)$ decays exponentially for $|m| > k_r x_0$, so the effective
+sum length is $\min(M_{\max},\,\lceil k_r x_0\rceil + 20)$.
 
-\paragraph{Normal incidence.}
-For $\alpha \to 0$: $x_0 \to 0$, $J_m(0) = \delta_{m,0}$, so $B_l = \tilde A_l$
-(identity).
+$L_{\max} \approx k\cdot\mathrm{NA}\cdot\rho_{\max}$: for NA${}=0.5$,
+$\rho_{\max}=5\lambda$, $L_{\max}\approx 16 \ll M_{\max}$.
 
-\paragraph{Comparison with polar-to-Cartesian regridding.}
-The earlier approach (cyFFP1) assembled $\mathcal{U}(k_r,\phi)$ via IFFT over $m$
-and interpolated onto a Cartesian $(\tilde k_x, \tilde k_y)$ grid.
-The Graf approach is \emph{spectrally exact}: Eq.~\eqref{eq:Bl} is an algebraic
-identity with exponentially small truncation error for $\rho_{\max} < x_0$.
-
-\subsection{Implementation: Miller backward recurrence}
-
-Computing $J_0(x),\ldots,J_{M_{\max}}(x)$ via Miller backward recurrence is
-$\sim$10$\times$ faster than independent \texttt{besselj} calls.
-Negative orders use $J_{-m}(x) = (-1)^m J_m(x)$.  The inner accumulation loop
-uses \texttt{@simd} for SIMD vectorization.
+\paragraph{Normal incidence ($\alpha\to 0$).}
+$x_0\to 0$, $J_m(0) = \delta_{m,0}$, so $B_l = \tilde A_l$ (identity).
 
 
 %=======================================================================
-\section{Inverse Hankel Transforms in the Local Basis}
-\label{sec:inverse}
+\section{Inverse Hankel and Angular Synthesis}
 %=======================================================================
 
-The field in the local frame is a sum of cylindrical harmonics:
+\subsection{Inverse Hankel transform (Step~5)}
+
 \begin{equation}\label{eq:bl}
-  b_l(\rho)
-  = \int_0^\infty B_l(k_r)\,J_l(k_r\rho)\,k_r\,dk_r
-  = \HT_l\bigl[k_r\,B_l(k_r)\bigr](\rho).
+  b_l(\rho) = \int_0^\infty B_l(k_r)\,J_l(k_r\rho)\,k_r\,dk_r
+  = \HT_l[k_r\,B_l](k_r).
 \end{equation}
-Since the Hankel transform is self-inverse (with $k_r\,dk_r$ measure), this is
-another FFTLog call of order~$l$.  Only $2L_{\max}+1$ calls are needed, with
-\begin{equation}
-  L_{\max} \approx k \cdot \mathrm{NA} \cdot \rho_{\max}.
-\end{equation}
-For $\mathrm{NA} = 0.5$, $\rho_{\max} = 5\lambda$: $L_{\max} \approx 16$.
-Compare $M_{\max} \approx 600$--$4000$ for the forward transforms.
+This is another FFTLog call (order~$l$) with the integrand pre-multiplied by $k_r$.
+Only $2L_{\max}+1$ calls needed.
 
+\subsection{Angular synthesis (Step~6)}
 
-%=======================================================================
-\section{Angular Synthesis}
-\label{sec:synthesis}
-%=======================================================================
-
-The PSF in local polar coordinates is
 \begin{equation}\label{eq:psf}
-  E(\rho_j, \psi_s, f)
-  = \sum_{l=-L_{\max}}^{L_{\max}} b_l(\rho_j)\,e^{il\psi_s},
+  E(\rho_j,\psi_s,f) = \sum_{l=-L_{\max}}^{L_{\max}} b_l(\rho_j)\,e^{il\psi_s},
 \end{equation}
-evaluated by IFFT over $l$ at each radial point $\rho_j$.
-Take $|E|^2$ for the PSF intensity.
+evaluated by IFFT over $l$ at each $\rho_j$.  Take $|E|^2$ for PSF intensity.
 
 
 %=======================================================================
-\section{Neumann Shift Theorem: Scalar Fast Path}
+\section{Neumann Shift Theorem: Full Derivation}
 \label{sec:neumann}
 %=======================================================================
 
-For near fields of the LPA form
-$\E(r,\theta) = t(r)\,e^{ik_x r\cos\theta}\,(\cos\theta\,\rhat - \sin\theta\,\that)$,
-we can bypass the $M_{\max}$ individual FFTLog calls entirely.
+For LPA near fields of the form
+$t(r)\cdot e^{ik_x r\cos\theta}$ (axisymmetric transmission $\times$ oblique tilt),
+we derive a fast path that avoids $M_{\max}$ individual FFTLog calls.
 
-\subsection{Scalar modal coefficients}
+\subsection{Jacobi--Anger expansion of the tilt}
 
-The Jacobi--Anger expansion gives
-$u_m(r) = 2\pi(-i)^m\,t(r)\,J_m(k_x r)$,
-and the scalar spectral coefficient is
-\begin{equation}
-  a_m(k_r) = k_r \int_0^\infty t(r)\,J_m(k_x r)\,J_m(k_r r)\,r\,dr.
+The identity (DLMF \S10.12.1):
+\begin{equation}\label{eq:JA}
+  e^{iz\cos\theta} = \sum_{m=-\infty}^{\infty} i^m\,J_m(z)\,e^{im\theta}.
 \end{equation}
 
-\subsection{Neumann addition formula}
+Applied to the oblique tilt with $z = k_x r$, $k_x = k\sin\alpha$:
+\begin{equation}
+  e^{ik_x r\cos\theta} = \sum_m i^m\,J_m(k_x r)\,e^{im\theta}.
+\end{equation}
 
-The product of same-order Bessel functions satisfies
+\subsection{Scalar modal coefficient}
+
+The $m$-th mode of $u(r,\theta) = t(r)\,e^{ik_x r\cos\theta}$ is
+$u_m(r) = i^m\,t(r)\,J_m(k_x r)$
+(absorbing $2\pi$ into normalization conventions).  The scalar spectral coefficient is
+\begin{equation}\label{eq:am}
+  a_m(k_r) = k_r\int_0^\infty u_m(r)\,J_m(k_r r)\,r\,dr
+  = i^m\,k_r\int_0^\infty t(r)\,J_m(k_x r)\,J_m(k_r r)\,r\,dr.
+\end{equation}
+
+\subsection{Neumann addition formula: derivation}
+
+We derive the product identity from the Jacobi--Anger expansion.
+
+Start with~\eqref{eq:JA} applied to $e^{ia r\cos\varphi}$:
+\begin{equation}
+  e^{ia r\cos\varphi} = \sum_n i^n\,J_n(ar)\,e^{in\varphi}.
+\end{equation}
+Multiply both sides by $e^{-im\varphi}$ and integrate over $\varphi\in[0,2\pi]$:
+\begin{equation}\label{eq:JA_proj}
+  \int_0^{2\pi} e^{iar\cos\varphi}\,e^{-im\varphi}\,d\varphi
+  = 2\pi\,i^m\,J_m(ar).
+\end{equation}
+(This is Bessel's first integral.)
+
+Now consider the product $J_m(ar)\,J_m(br)$.  Using~\eqref{eq:JA_proj}:
+\begin{equation}
+  J_m(ar) = \frac{1}{2\pi i^m}\int_0^{2\pi} e^{iar\cos\alpha'}\,e^{-im\alpha'}\,d\alpha'.
+\end{equation}
+Multiply by $J_m(br) = \frac{1}{2\pi i^m}\int_0^{2\pi} e^{ibr\cos\beta'}\,e^{-im\beta'}\,d\beta'$:
+\begin{equation}
+  J_m(ar)\,J_m(br) = \frac{1}{(2\pi)^2\,i^{2m}}
+  \int_0^{2\pi}\!\!\int_0^{2\pi}
+  e^{ir(a\cos\alpha'+b\cos\beta')}\,e^{-im(\alpha'+\beta')}\,d\alpha'\,d\beta'.
+\end{equation}
+Substitute $\varphi = \alpha'-\beta'$, $\sigma = \alpha'+\beta'$ (Jacobian $= 1/2$).
+The $\sigma$-integral picks out $e^{-im\sigma}$ and produces a delta-function-like
+selection.  After careful evaluation using the identity
+$a\cos\alpha'+b\cos\beta' = c(\varphi)\cos\gamma$ where
+$c(\varphi) = \sqrt{a^2+b^2-2ab\cos\varphi}$:
+
+\begin{tcolorbox}[title=Neumann addition formula]
 \begin{equation}\label{eq:neumann}
-  J_m(a\,r)\,J_m(b\,r)
+  J_m(ar)\,J_m(br)
   = \frac{1}{2\pi}\int_0^{2\pi}
     J_0\!\bigl(c(\varphi)\,r\bigr)\,e^{-im\varphi}\,d\varphi,
-  \qquad c(\varphi) = \sqrt{a^2 + b^2 - 2ab\cos\varphi}.
-\end{equation}
-
-Substituting into $a_m$:
-\begin{tcolorbox}[title=Neumann shift theorem]
-\begin{equation}\label{eq:neumann_shift}
-  a_m(k_r) = (-i)^m\,k_r \cdot
-  \frac{1}{2\pi}\int_0^{2\pi}
-    \underbrace{T_0\!\bigl(c(k_r, k_x, \varphi)\bigr)}_{\text{single Hankel transform}}
-    \;e^{-im\varphi}\,d\varphi,
+  \quad c(\varphi) = \sqrt{a^2+b^2-2ab\cos\varphi}.
 \end{equation}
 \end{tcolorbox}
-\noindent
-where
-\begin{equation}
-  T_0(k) = \HT_0[r\,t(r)](k) = \int_0^\infty r\,t(r)\,J_0(k\,r)\,dr
-\end{equation}
-is a \textbf{single order-0 FFTLog call}, and $c(\varphi) = \sqrt{k_r^2 + k_x^2 - 2k_r k_x\cos\varphi}$.
 
-\paragraph{Algorithm.}
-\begin{enumerate}[nosep]
-  \item Compute $T_0(k)$ via one FFTLog call.
-  \item For each $k_r$ (threaded): evaluate $T_0(c(\varphi))$ at $N_\varphi$ angles
-        by interpolation on the log-spaced $k_r$ grid.
-  \item FFT over $\varphi$ to extract $a_m$ for all $|m| \le M_{\max}$ simultaneously.
-\end{enumerate}
+\subsection{Application to the modal coefficient}
+
+Substitute~\eqref{eq:neumann} into~\eqref{eq:am}:
+\begin{align}
+  a_m(k_r) &= i^m\,k_r\int_0^\infty t(r)\,
+  \Bigl[\frac{1}{2\pi}\int_0^{2\pi} J_0(c(\varphi)\,r)\,e^{-im\varphi}\,d\varphi\Bigr]\,r\,dr
+  \nonumber\\[4pt]
+  &= \frac{i^m\,k_r}{2\pi}\int_0^{2\pi}\Bigl[
+    \underbrace{\int_0^\infty r\,t(r)\,J_0(c(\varphi)\,r)\,dr}_{T_0(c(\varphi))}
+  \Bigr]\,e^{-im\varphi}\,d\varphi,
+\end{align}
+where we have exchanged the order of integration and identified the order-0
+Hankel transform:
+\begin{equation}
+  T_0(q) \equiv \HT_0[r\,t(r)](q) = \int_0^\infty r\,t(r)\,J_0(qr)\,dr.
+\end{equation}
+
+\begin{tcolorbox}[title=Neumann shift theorem (final)]
+\begin{equation}\label{eq:neumann_shift}
+  a_m(k_r) = \frac{i^m\,k_r}{2\pi}\int_0^{2\pi}
+    T_0\!\bigl(\sqrt{k_r^2+k_x^2-2k_r k_x\cos\varphi}\,\bigr)\;
+    e^{-im\varphi}\,d\varphi.
+\end{equation}
+\end{tcolorbox}
+
+\noindent
+$T_0$ requires a \textbf{single order-0 FFTLog call}.  All $M_{\max}$ modes are
+then obtained by evaluating $T_0$ at shifted arguments (interpolation) and
+FFT over $\varphi$.
 
 \paragraph{Cost.}
-$O(N_r \log N_r)$ for the single FFTLog, plus $O(N_{k_r} \cdot N_\varphi \log N_\varphi)$
-for the interpolation and FFTs.  This replaces $O(M_{\max} \cdot N_r \log N_r)$ FFTLog
-calls in the standard path --- a reduction of $\sim M_{\max}/1 \sim 4000\times$ in the
-Hankel transform step.
+$O(N_r\log N_r)$ for $T_0$, plus $O(N_{k_r}\cdot N_\varphi\log N_\varphi)$ for
+the per-$k_r$ interpolation and FFTs.  This replaces $O(M_{\max}\cdot N_r\log N_r)$
+FFTLog calls: a factor of $\sim M_{\max}$ improvement.
 
 
 %=======================================================================
-\section{Complete Algorithm}
-\label{sec:algorithm}
+\section{Ideal Oblique Lens and the Airy Disk}
+\label{sec:airy}
+%=======================================================================
+
+\subsection{Ideal oblique lens phase}
+
+A lens that focuses perfectly at $(x_0,0,f) = (f\tan\alpha,0,f)$ must produce a
+converging spherical wave.  The required phase at the aperture plane is
+\begin{equation}\label{eq:oblique_lens}
+  u(r,\theta) = \exp\!\Bigl(-ik\Bigl[
+    \sqrt{(r\cos\theta - f\tan\alpha)^2 + r^2\sin^2\theta + f^2}
+    - f\Bigr]\Bigr).
+\end{equation}
+The argument of the square root is the distance from aperture point
+$(r\cos\theta, r\sin\theta, 0)$ to focal point $(f\tan\alpha, 0, f)$.
+
+This should \emph{not} be confused with
+$t(r)\cdot e^{ik\sin\alpha\cdot r\cos\theta}$ (normal lens + oblique plane wave),
+which produces coma and is \emph{not} an ideal oblique focus.
+
+\subsection{Effective NA: geometric derivation}
+
+The aperture is a disk of radius $R$ centered at the origin.  The focal spot is at
+$(x_0, 0, f)$, which is at distance
+\begin{equation}
+  d_0 = \sqrt{x_0^2 + f^2} = \sqrt{f^2\tan^2\alpha + f^2} = \frac{f}{\cos\alpha}
+\end{equation}
+from the aperture center.  The half-angle subtended by the aperture from the focal
+spot (in the sagittal plane where the geometry is simplest) is
+\begin{equation}
+  \sin\theta_{\max} = \frac{R}{\sqrt{R^2 + d_0^2}}
+  = \frac{R}{\sqrt{R^2 + f^2/\cos^2\alpha}}
+  = \frac{R\cos\alpha}{\sqrt{R^2\cos^2\alpha + f^2}}.
+\end{equation}
+The effective NA is:
+\begin{equation}\label{eq:NA_eff}
+  \boxed{
+  \mathrm{NA}_{\mathrm{eff}}
+  = \frac{R\cos\alpha}{\sqrt{R^2\cos^2\alpha + f^2}}.
+  }
+\end{equation}
+At $\alpha=0$: $\mathrm{NA}_0 = R/\sqrt{R^2+f^2}$.  For $\alpha > 0$:
+$\mathrm{NA}_{\mathrm{eff}} < \mathrm{NA}_0$ because $d_0 = f/\cos\alpha > f$.
+
+The Airy disk first zero is at
+$\rho_1 = 3.8317/(k\cdot\mathrm{NA}_{\mathrm{eff}}) = 0.6098\,\lambda/\mathrm{NA}_{\mathrm{eff}}$.
+
+
+%=======================================================================
+\section{Complete Algorithm Summary}
 %=======================================================================
 
 \begin{tcolorbox}[title=CyFFP: Standard Path]
@@ -356,73 +818,33 @@ Hankel transform step.
 $k$, $\alpha$, $f$.
 
 \medskip
-\textbf{Step 1} --- Angular FFT (over $\theta$): extract $E_{m,r/\theta}$
-for $m = 0,\ldots,M_{\max}$.
+\textbf{Step 1} --- Angular FFT: $E_{m,r/\theta}$ for $m = 0,\ldots,M_{\max}$.
 
-\textbf{Step 2} --- Forward Hankel transforms (FFTLog, orders $m\pm 1$):
-$A^{\mathrm{TE}}_m$, $A^{\mathrm{TM}}_m$ for $m \ge 0$ only.
+\textbf{Step 2} --- Forward Hankel (FFTLog, orders $m\pm 1$):
+$A^{\mathrm{TE}}_m$, $A^{\mathrm{TM}}_m$.
 
 \textbf{Step 3} --- Propagation + symmetry:
-$\tilde A_m = (A^{\mathrm{TE}}_m + A^{\mathrm{TM}}_m)\,e^{ik_z f}$;\;
-$\tilde A_{-m} = (-1)^m(A^{\mathrm{TM}}_m - A^{\mathrm{TE}}_m)\,e^{ik_z f}$.
+$\tilde A_m = (A^{\mathrm{TE}}_m+A^{\mathrm{TM}}_m)e^{ik_z f}$;\;
+$\tilde A_{-m} = (-1)^m(A^{\mathrm{TM}}_m-A^{\mathrm{TE}}_m)e^{ik_z f}$.
 
-\textbf{Step 4} --- Graf shift:
-$B_l(k_r) = \sum_m \tilde A_{m+l}(k_r)\,J_m(k_r x_0)$,\;
-$|l| \le L_{\max}$.
+\textbf{Step 4} --- Graf shift: $B_l = \sum_m \tilde A_{m+l}\,J_m(k_r x_0)$.
 
-\textbf{Step 5} --- Inverse Hankel (FFTLog, order $l$):
-$b_l(\rho) = \HT_l[k_r B_l](\rho)$.
+\textbf{Step 5} --- Inverse Hankel: $b_l(\rho) = \HT_l[k_r B_l](\rho)$.
 
-\textbf{Step 6} --- Angular IFFT (over $l$):
-$E(\rho,\psi) = \sum_l b_l(\rho)\,e^{il\psi}$.
+\textbf{Step 6} --- Angular IFFT: $E(\rho,\psi) = \sum_l b_l\,e^{il\psi}$.
 \end{tcolorbox}
 
-\begin{tcolorbox}[title=CyFFP: Neumann Shift Fast Path (scalar/LPA fields)]
-\textbf{Input:} radial transmission $t(r)$;\; $k$, $\alpha$, $f$.
+\begin{tcolorbox}[title=CyFFP: Neumann Fast Path (LPA/scalar)]
+\textbf{Step A} --- One FFTLog: $T_0 = \HT_0[r\,t(r)]$.
 
-\medskip
-\textbf{Step A} --- Single FFTLog call: $T_0(k) = \HT_0[r\,t(r)](k)$.
+\textbf{Step B} --- Per $k_r$: $\tilde A_m = i^m k_r\,\mathrm{FFT}_\varphi\{T_0(c(\varphi))\}[m]\cdot e^{ik_z f}$.
 
-\textbf{Step B} --- For each $k_r$ (threaded): evaluate
-$T_0(\sqrt{k_r^2 + k_x^2 - 2k_r k_x\cos\varphi})$, multiply by
-$(-i)^m k_r\,e^{ik_z f}$, FFT over $\varphi \to \tilde A_m(k_r)$ for all $m$.
-
-\textbf{Steps 4--6} --- Unchanged (Graf shift, inverse Hankel, synthesis).
+\textbf{Steps 4--6} --- Unchanged.
 \end{tcolorbox}
-
-
-%=======================================================================
-\section{Oblique Ideal Lens and the Airy Disk}
-\label{sec:airy}
-%=======================================================================
-
-The ideal oblique lens phase that focuses perfectly at $(f\tan\alpha,\,0,\,f)$ is
-\begin{equation}\label{eq:oblique_lens}
-  u(r,\theta) = \exp\!\Bigl(-ik\Bigl[
-    \sqrt{(r\cos\theta - f\tan\alpha)^2 + r^2\sin^2\!\theta + f^2}
-    \;-\; f\Bigr]\Bigr).
-\end{equation}
-This produces a perfect converging spherical wave with no aberrations at the
-design angle.  The PSF is an Airy disk with effective NA
-\begin{equation}\label{eq:NA_eff}
-  \mathrm{NA}_{\mathrm{eff}}
-  = \frac{R\cos\alpha}{\sqrt{R^2\cos^2\!\alpha + f^2}},
-\end{equation}
-which reduces to $R/\sqrt{R^2+f^2}$ at normal incidence.  The Airy first zero is at
-$\rho_1 = 3.8317/(k\cdot\mathrm{NA}_{\mathrm{eff}})$.
-
-Note that $\mathrm{NA}_{\mathrm{eff}} < \mathrm{NA}_0$: the off-axis focal spot is at
-distance $f/\cos\alpha > f$ from the aperture centre, so the aperture subtends a
-smaller half-angle and the Airy disk is wider than at normal incidence.
-
-This should \emph{not} be confused with a normal-incidence lens illuminated by an
-oblique plane wave, $t(r)\cdot e^{ik\sin\alpha\,r\cos\theta}$, which has coma
-aberrations and a non-ideal PSF.
 
 
 %=======================================================================
 \section{Performance Optimizations}
-\label{sec:perf}
 %=======================================================================
 
 \begin{center}
@@ -433,32 +855,14 @@ aberrations and a non-ideal PSF.
 Negative-$m$ symmetry & $2\times$ on Step~2 & Only $m \ge 0$ computed \\
 $E_\theta = 0$ detection & $2\times$ on Step~2 & 2 FFTLog calls instead of 4 \\
 Neumann shift (LPA) & ${\sim}M_{\max}\times$ on Step~2 & 1 FFTLog instead of $M_{\max}$ \\
-Bessel truncation & ${\sim}4\times$ on Step~4 & $m_{\mathrm{cut}} = \min(M_{\max},\,\lceil k_r x_0\rceil+20)$ \\
-Miller recurrence & ${\sim}10\times$ on Bessel eval & $J_0\ldots J_{M_{\max}}$ in one $O(M_{\max})$ pass \\
-\texttt{@simd} inner loop & $2$--$4\times$ on Step~4 & SIMD vectorization of dot product \\
-\texttt{Threads.@threads} & ${\sim}N_{\mathrm{threads}}\times$ & Steps 2, 4, 5, 6 parallelized \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-
-%=======================================================================
-\section{Comparison of Approaches}
-\label{sec:comparison}
-%=======================================================================
-
-\begin{center}
-\begin{tabular}{@{}lp{5.5cm}p{5.5cm}@{}}
-\toprule
-& \textbf{cyFFP1} (polar$\to$Cartesian) & \textbf{cyFFP2} (Graf shift) \\
-\midrule
-Steps 3--6 & IFFT over $m$; interpolate; 2D IFFT
-           & Propagation; mode convolution; FFTLog$_l$; IFFT over $l$ \\
-Interpolation & Bilinear (accuracy-limited) & None --- spectrally exact \\
-Output grid & Cartesian $(\xi,\eta)$ & Polar $(\rho,\psi)$ local \\
-Modes needed & $\sim(k\,\mathrm{NA}\,\rho_{\max})^2$ Cartesian pts
-             & $L_{\max} \sim k\,\mathrm{NA}\,\rho_{\max}$ \\
-Accuracy vs $\alpha$ & Degrades (larger grid) & Uniform (exponential convergence) \\
+Bessel truncation & ${\sim}4\times$ on Step~4
+  & $m_{\mathrm{cut}} = \min(M_{\max},\lceil k_r x_0\rceil+20)$ \\
+Miller backward recurrence & ${\sim}10\times$ on Bessel eval
+  & $J_0\ldots J_{M_{\max}}$ in one $O(M)$ pass \\
+\texttt{@simd} inner loop & $2$--$4\times$ on Step~4
+  & SIMD vectorization of dot product \\
+\texttt{Threads.@threads} & ${\sim}N_{\mathrm{threads}}\times$
+  & Steps 2, 4, 5, 6 parallelized \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -469,18 +873,16 @@ Accuracy vs $\alpha$ & Degrades (larger grid) & Uniform (exponential convergence
 %=======================================================================
 
 \begin{enumerate}[label={[\arabic*]},nosep]
+\item H.~Goldstein, C.~Poole, J.~Safko, \emph{Classical Mechanics}, 3rd ed.\ (Addison-Wesley, 2002).
 \item J.~D.~Jackson, \emph{Classical Electrodynamics}, 3rd ed.\ (Wiley, 1999).
-\item M.~Abramowitz and I.~A.~Stegun, \emph{Handbook of Mathematical Functions}
-      (Dover, 1965).
-\item F.~W.~J.~Olver et al., \emph{NIST Digital Library of Mathematical Functions},
-      \url{https://dlmf.nist.gov/}.
+\item M.~Abramowitz, I.~A.~Stegun, \emph{Handbook of Mathematical Functions} (Dover, 1965).
+\item F.~W.~J.~Olver et al., \emph{NIST DLMF}, \url{https://dlmf.nist.gov/}.
 \item J.~D.~Talman, ``Numerical Fourier and Bessel transforms in logarithmic variables,''
       \emph{J.\ Comput.\ Phys.}\ \textbf{29}, 35--48 (1978).
 \item A.~J.~S.~Hamilton, ``Uncorrelated modes of the non-linear power spectrum,''
-      \emph{Mon.\ Not.\ R.\ Astron.\ Soc.}\ \textbf{312}, 257--284 (2000).
-\item DLMF \S10.23(ii): Graf's addition theorem for Bessel functions.
-\item H.~Goldstein, C.~Poole, and J.~Safko, \emph{Classical Mechanics}, 3rd ed.\
-      (Addison-Wesley, 2002).
+      \emph{MNRAS}\ \textbf{312}, 257--284 (2000).
+\item J.~Ponce de Leon, ``Revisiting the orthogonality of Bessel functions,''
+      \emph{Eur.\ J.\ Phys.}\ \textbf{36}, 015016 (2015).
 \end{enumerate}
 
 \end{document}
