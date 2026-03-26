@@ -23,7 +23,7 @@ using FFTW
 using SpecialFunctions: loggamma, besselj
 
 export angular_decompose, fftlog_hankel,
-       compute_scalar_coeffs, propagate_scalar,
+       compute_scalar_coeffs, neumann_shift_coeffs, propagate_scalar,
        graf_shift, inverse_hankel, angular_synthesis
 
 # ═══════════════════════════════════════════════════════════════
@@ -411,6 +411,120 @@ function compute_scalar_coeffs(u_m::Matrix{ComplexF64},
     end
 
     return a_m, kr_grid
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 2 (Neumann fast path) — Shift Theorem for LPA Fields
+#
+# For near fields of the form u(r,θ) = t(r) exp(ikₓ r cosθ),
+# where t(r) is a radially symmetric transmission, the Neumann
+# addition formula converts the per-mode Hankel transforms into:
+#
+#   a_m(kr) = (i^m / 2π) ∫₀^{2π} T₀(c(φ)) e^{-imφ} dφ
+#
+# where T₀(q) = H₀[r t(r)](q) is a SINGLE order-0 Hankel transform,
+# and c(φ) = √(kr² + kₓ² - 2 kr kₓ cosφ).
+#
+# Cost: O(Nr log Nr) for T₀, plus O(Nkr · Nφ log Nφ) for the
+# per-kr interpolation and FFTs.  This replaces O(M_max · Nr log Nr)
+# per-mode FFTLog calls with a single one.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    neumann_shift_coeffs(t_r, r, k, alpha, M_max) -> (a_m, kr_grid, m_pos)
+
+Compute scalar spectral coefficients for an LPA near field
+`u(r,θ) = t(r) exp(ikₓ r cosθ)` via the Neumann addition formula.
+
+Replaces `compute_scalar_coeffs` when the near field factors as a
+radial transmission × oblique plane wave tilt.  Uses a **single**
+order-0 FFTLog call instead of M_max individual calls.
+
+# Arguments
+- `t_r[Nr]`   : radial transmission t(r) on log-spaced r grid
+- `r[Nr]`     : log-spaced radial grid
+- `k`         : wavenumber 2π/λ
+- `alpha`     : oblique incidence angle (radians)
+- `M_max`     : maximum angular mode index
+
+# Returns
+- `a_m[Nr, M_max+1]` : spectral coefficients for m = 0, ..., M_max
+- `kr_grid[Nr]`       : reciprocal log-grid (same as compute_scalar_coeffs)
+- `m_pos[M_max+1]`    : mode indices [0, 1, ..., M_max]
+"""
+function neumann_shift_coeffs(t_r::AbstractVector,
+                               r::Vector{Float64},
+                               k::Float64, alpha::Float64,
+                               M_max::Int)
+    Nr  = length(r)
+    dln = log(r[2] / r[1])
+    kx  = k * sin(alpha)
+
+    kr_grid = exp.(log(1.0 / r[end]) .+ dln .* (0:Nr-1))
+    m_pos   = collect(0:M_max)
+
+    # ─── Step A: single order-0 FFTLog for T₀ ────────────────
+    # T₀(q) = ∫₀^∞ r t(r) J₀(qr) dr = H₀[r t(r)](q)
+    g    = r .* complex.(t_r)
+    raw  = fftlog_hankel(g, dln, 0.0)
+    T0   = raw ./ kr_grid   # divide by kr (FFTLog output convention)
+
+    # ─── Step B: per-kr interpolation + FFT over φ ────────────
+    N_phi = max(2M_max + 1, 256)
+    N_phi = 1 << ceil(Int, log2(N_phi))   # round up to power of 2
+    phi   = range(0.0, 2π, length=N_phi+1)[1:end-1]
+
+    a_m = zeros(ComplexF64, Nr, M_max + 1)
+
+    # Precompute i^m factors (cyclic: 1, i, -1, -i)
+    im_factors = [Complex(0.0, 1.0)^m for m in m_pos]
+
+    # Log-interpolation setup for T₀
+    log_kr_min = log(kr_grid[1])
+
+    # Pre-allocate per-thread FFT buffers and plans
+    nt = Threads.maxthreadid()
+    phi_bufs   = [Vector{ComplexF64}(undef, N_phi) for _ in 1:nt]
+    phi_plans  = [plan_fft!(phi_bufs[t]; flags=FFTW.MEASURE) for t in 1:nt]
+
+    # Precompute cos(φ) values
+    cos_phi = [cos(phi[s]) for s in 1:N_phi]
+
+    Threads.@threads for ikr in 1:Nr
+        tid = Threads.threadid()
+        buf = phi_bufs[tid]
+        pf  = phi_plans[tid]
+
+        kv = kr_grid[ikr]
+
+        # Interpolate T₀ at c(φ) = √(kr² + kₓ² - 2 kr kₓ cosφ)
+        @inbounds for s in 1:N_phi
+            c_sq = kv^2 + kx^2 - 2*kv*kx*cos_phi[s]
+            c = sqrt(max(c_sq, 0.0))
+
+            if c < kr_grid[1] || c > kr_grid[end]
+                buf[s] = zero(ComplexF64)
+            else
+                lc    = log(c)
+                idx_f = (lc - log_kr_min) / dln + 1.0
+                j0    = clamp(floor(Int, idx_f), 1, Nr - 1)
+                w     = idx_f - j0
+                buf[s] = (1 - w) * T0[j0] + w * T0[j0 + 1]
+            end
+        end
+
+        # FFT over φ: F[m] = Σ_s buf[s] e^{-2πi ms/Nφ}
+        pf * buf
+
+        # Extract modes: a_m(kr) = i^m / Nφ × F[m]
+        @inbounds for idx in 1:M_max+1
+            m = m_pos[idx]
+            a_m[ikr, idx] = im_factors[idx] * buf[m + 1] / N_phi
+        end
+    end
+
+    return a_m, kr_grid, m_pos
 end
 
 

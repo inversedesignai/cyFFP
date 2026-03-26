@@ -60,9 +60,9 @@ Single-module design in `cyffp.jl`. The scalar pipeline propagates a single Cart
 5. **Inverse Hankel** (`inverse_hankel`) — FFTLog in local basis; only 2L_max+1 calls (~27); output ρ-grid = reciprocal of kr-grid = original r-grid; threaded over modes
 6. **Angular synthesis** (`angular_synthesis`) — IFFT over local modes; u(ρ,ψ) = Σ_l b_l(ρ) e^{ilψ}; take |u|² for PSF intensity
 
-### Neumann shift-theorem fast path (not yet implemented)
+### Neumann shift-theorem fast path (`neumann_shift_coeffs`)
 
-For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Reduces Step 2 from O(M_max · Nr log Nr) to O(Nr log Nr + Nkr · Nphi log Nphi).
+For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Replaces `compute_scalar_coeffs` (Step 2) for this field type. Output feeds directly into `propagate_scalar` (Step 3). Validated against standard path (0.48% RMS, 0.88% PSF). Physics tests: coma asymmetry, Strehl < ideal, y-mirror symmetry.
 
 ## Key Design Decisions
 
