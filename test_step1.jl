@@ -338,7 +338,7 @@ Em_r_13, Em_t_13, m_pos_13 = angular_decompose(Er_13, Et_13, M_max_13)
 
 # --- 13a: Check against explicit numerical integration for selected m's ---
 println("\n  13a: Explicit quadrature vs FFT for selected modes")
-test_modes = [0, 1, 5, 20, 50, M_max_13 - 5]
+test_modes = [0, 1, 3, M_max_13 ÷ 2, M_max_13 - 2, M_max_13]
 max_err_13a = 0.0
 for m in test_modes
     idx = m + 1   # column index in Em_r_13
