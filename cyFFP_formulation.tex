@@ -102,10 +102,10 @@ Some near fields admit closed-form $E_m(r)$ without requiring an FFT over $\thet
 
 \begin{itemize}[nosep]
   \item \textbf{LPA / normal lens $+$ oblique wave:}
-    $\E = t(r)\,e^{ik_x r\cos\theta}(\cos\theta\,\rhat - \sin\theta\,\that)$.
+    $\E = t(r)\,e^{ik_x r\cos\theta}\,\hat p$, where $\hat p$ is the
+    polarization vector ($\yhat$ for $s$-pol, $\xhat$ for $p$-pol).
     The Jacobi--Anger expansion gives an analytical $E_m(r)$
-    (see \S\ref{sec:neumann}).  This is the fast-path case handled by
-    \texttt{cyfft\_farfield\_shift}.
+    (see \S\ref{sec:neumann}).  This is the fast-path case.
 
   \item \textbf{Ideal oblique lens:}
     $u(r,\theta) = \exp(-ik[\sqrt{(r\cos\theta-x_0)^2 + r^2\sin^2\theta + f^2} - f])$.
@@ -196,15 +196,19 @@ $\H = \frac{1}{\mu}\nabla\times\A = \nabla\times\bpsi$:
 where $J_m' \equiv dJ_m(k_r r)/d(k_r r)$.  Note $H_z = 0$ (TM condition).
 
 \paragraph{Electric field.}
-From $\nabla\times\H = -i\omega\epsilon\,\E$, so $\E = \frac{1}{i\omega\epsilon}\nabla\times\H$:
+From $\nabla\times\H = -i\omega\epsilon\,\E$, we have
+$\E = \frac{-1}{i\omega\epsilon}\nabla\times\H = \frac{i}{\omega\epsilon}\nabla\times\H$.
+The $r$ and $\theta$ components of $\nabla\times\H$ (with $H_z = 0$) are
+$(\nabla\times\H)_r = -\partial H_\theta/\partial z$ and
+$(\nabla\times\H)_\theta = \partial H_r/\partial z$.  Therefore:
 \begin{align}
-  E_r &= \frac{1}{i\omega\epsilon}\Bigl(-\frac{\partial H_\theta}{\partial z}\Bigr)
-       = \frac{1}{i\omega\epsilon}(ik_z)\,k_r J_m'
+  E_r &= \frac{i}{\omega\epsilon}\Bigl(-\frac{\partial H_\theta}{\partial z}\Bigr)
+       = \frac{i}{\omega\epsilon}\bigl(-ik_z\bigr)\bigl(-k_r J_m'\bigr)
        = -\frac{k_z}{\omega\epsilon}\,k_r J_m', \label{eq:TM_Er}\\[4pt]
-  E_\theta &= \frac{1}{i\omega\epsilon}\frac{\partial H_r}{\partial z}
-            = \frac{1}{i\omega\epsilon}(ik_z)\frac{im}{r}J_m
-            = -\frac{mk_z}{\omega\epsilon\, r}\,J_m, \label{eq:TM_Eth}\\[4pt]
-  E_z &= \frac{1}{i\omega\epsilon}\frac{1}{r}\Bigl[\frac{\partial(rH_\theta)}{\partial r}
+  E_\theta &= \frac{i}{\omega\epsilon}\frac{\partial H_r}{\partial z}
+            = \frac{i}{\omega\epsilon}(ik_z)\frac{im}{r}J_m
+            = -\frac{i\,m\,k_z}{\omega\epsilon\, r}\,J_m, \label{eq:TM_Eth}\\[4pt]
+  E_z &= \frac{i}{\omega\epsilon}\frac{1}{r}\Bigl[\frac{\partial(rH_\theta)}{\partial r}
           - \frac{\partial H_r}{\partial\theta}\Bigr].
 \end{align}
 Using $\omega\epsilon = k\sqrt{\epsilon/\mu} = k/\eta$ (where $\eta = \sqrt{\mu/\epsilon}$),
@@ -371,7 +375,7 @@ from~\eqref{eq:ETM_tang} at $z=0$ (dropping $\eta$) is
 \begin{equation}
   \E^{\mathrm{TM},\perp}_{m,k_r}
   = -\frac{k_z}{k}\,\frac{\partial J_m}{\partial r}\,\rhat
-  - i\frac{mk_z}{kr}\,J_m\,\that.
+  - \frac{i\,m\,k_z}{k\,r}\,J_m\,\that.
 \end{equation}
 
 \subsection{TM--TM inner product}
@@ -396,7 +400,7 @@ The dot product with the near field gives:
 \begin{equation}
   \E^{\mathrm{Near}}_m\cdot\E^{\mathrm{TM}*}
   = -\frac{k_z}{k}\frac{\partial J_m}{\partial r}\,E_{m,r}
-  + i\frac{mk_z}{kr}\,J_m\,E_{m,\theta}.
+  + \frac{i\,m\,k_z}{k\,r}\,J_m\,E_{m,\theta}.
 \end{equation}
 
 After the normalization integral and substituting~\eqref{eq:moverx}--\eqref{eq:dJdr}:
@@ -874,7 +878,7 @@ $x_0\to 0$, $J_m(0) = \delta_{m,0}$, so $B_l = \tilde A_l$ (identity).
 
 \begin{equation}\label{eq:bl}
   b_l(\rho) = \int_0^\infty B_l(k_r)\,J_l(k_r\rho)\,k_r\,dk_r
-  = \HT_l[k_r\,B_l](k_r).
+  = \HT_l[k_r\,B_l](\rho).
 \end{equation}
 This is another FFTLog call (order~$l$) with the integrand pre-multiplied by $k_r$.
 Only $2L_{\max}+1$ calls needed.
@@ -943,11 +947,22 @@ Multiply by $J_m(br) = \frac{1}{2\pi i^m}\int_0^{2\pi} e^{ibr\cos\beta'}\,e^{-im
   \int_0^{2\pi}\!\!\int_0^{2\pi}
   e^{ir(a\cos\alpha'+b\cos\beta')}\,e^{-im(\alpha'+\beta')}\,d\alpha'\,d\beta'.
 \end{equation}
-Substitute $\varphi = \alpha'-\beta'$, $\sigma = \alpha'+\beta'$ (Jacobian $= 1/2$).
-The $\sigma$-integral picks out $e^{-im\sigma}$ and produces a delta-function-like
-selection.  After careful evaluation using the identity
-$a\cos\alpha'+b\cos\beta' = c(\varphi)\cos\gamma$ where
-$c(\varphi) = \sqrt{a^2+b^2-2ab\cos\varphi}$:
+Substitute $\varphi = \alpha'-\beta'$, $\sigma = \alpha'+\beta'$
+($d\alpha'\,d\beta' = \tfrac{1}{2}\,d\varphi\,d\sigma$).
+Writing $\alpha' = (\sigma+\varphi)/2$, $\beta' = (\sigma-\varphi)/2$:
+\begin{equation}
+  a\cos\alpha' + b\cos\beta'
+  = (a+b)\cos\tfrac{\sigma}{2}\cos\tfrac{\varphi}{2}
+  - (a-b)\sin\tfrac{\sigma}{2}\sin\tfrac{\varphi}{2}
+  \equiv c(\varphi)\cos(\sigma/2 - \gamma),
+\end{equation}
+where $c(\varphi) = \sqrt{a^2 + b^2 - 2ab\cos\varphi}$ (by the law of cosines)
+and $\gamma$ depends on $\varphi$ but not on $\sigma$.
+The $\sigma$-integral then becomes
+$\int_0^{4\pi} e^{ic(\varphi)r\cos(\sigma/2-\gamma)}\,e^{-im\sigma}\,d\sigma
+= 4\pi\,i^{2m}\,J_{2m}(\ldots)$, which after simplification reduces to
+$2\pi\,J_0(c(\varphi)\,r)$ (via the addition theorem for $J_0$).
+The net result is:
 
 \begin{tcolorbox}[title=Neumann addition formula]
 \begin{equation}\label{eq:neumann}
@@ -1156,8 +1171,8 @@ Lateral shift & $x_0 = f\tan\alpha \approx 1366\,\mu\text{m}$ \\
 \subsection{Grid sizing}
 
 \paragraph{Mode count.}
-$M_{\max} = \lceil k\sin\alpha\cdot R\rceil = \lceil 12.57 \times 0.174 \times 2000\rceil
-= \lceil 4373 \rceil \approx \mathbf{4365}$ angular modes.
+$M_{\max} = \lceil k\sin\alpha\cdot R\rceil = \lceil 4\pi\sin(10^\circ) \times 2000\rceil
+= \lceil 4365.4 \rceil = \mathbf{4366}$ angular modes.
 With negative-$m$ symmetry, only ${\sim}2183$ need to be computed.
 
 \paragraph{Radial grid.}
