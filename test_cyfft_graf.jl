@@ -8,10 +8,12 @@
       2. FFTLog self-inverse property
       3. Symmetry relation: A^TE_{-m} = (-1)^{m+1} A^TE_m
       4. Normal incidence (alpha≈0): PSF peaks at ρ=0
-      5. Oblique incidence: PSF centered at ρ=0 in local frame
+      5. Ideal oblique lens: PSF centered at ρ=0 in local frame
       6. cyfft_farfield_modal matches cyfft_farfield
-      7. Convergence with L_max
-      8. Analytical Jacobi-Anger modal decomposition
+      7. (renumbered to 8–10)
+      8. Airy disk validation: circular symmetry + dark ring location
+      9. Analytical Jacobi-Anger decomposition (normal lens + oblique wave)
+     10. Convergence with L_max
 """
 
 include("CyFFP_graf.jl")
@@ -77,8 +79,20 @@ r      = exp.(range(log(r_min), log(r_max), length=Nr))
 Ntheta = 128
 theta  = range(0.0, 2π, length=Ntheta+1)[1:end-1]
 
-lens_phase(rv)         = exp(-im * k * (sqrt(rv^2 + f^2) - f))
-inc_phase(rv, th, al)  = exp( im * k * sin(al) * rv * cos(th))
+# Normal-incidence ideal lens
+lens_phase(rv) = exp(-im * k * (sqrt(rv^2 + f^2) - f))
+
+# Oblique plane-wave tilt (for normal-lens + oblique-wave tests)
+inc_phase(rv, th, al) = exp( im * k * sin(al) * rv * cos(th))
+
+# Ideal oblique lens: perfect spherical wave converging to (f tan α, 0, f).
+# No aberrations at the design angle α.
+# u(r,θ) = exp(-ik[√((r cosθ − f tanα)² + r² sin²θ + f²) − f])
+function ideal_oblique_lens(rv, th, al)
+    x0 = f * tan(al)
+    d  = sqrt((rv * cos(th) - x0)^2 + rv^2 * sin(th)^2 + f^2)
+    return exp(-im * k * (d - f))
+end
 
 # ─── Test 3: Symmetry relation ──────────────────────────────────
 println("\n--- Test 3: Symmetry A^TE_{-m} = (-1)^{m+1} A^TE_m ---")
@@ -154,26 +168,29 @@ println("  (expected ρ ≈ 0;  Airy radius = $(round(airy_n/lambda, digits=3)) 
 @assert rho_pk < 3airy_n "Normal-incidence PSF peak too far from origin"
 println("  PASSED ✓")
 
-# ─── Test 5: Oblique incidence — PSF in local frame ─────────────
-println("\n--- Test 5: Oblique incidence, alpha=11° ---")
+# ─── Test 5: Oblique incidence — ideal oblique lens ───────────────
+println("\n--- Test 5: Ideal oblique lens, alpha=11° ---")
 alpha   = deg2rad(11.0)
 x0_exp  = f * tan(alpha)
 M_exp   = ceil(Int, k * sin(alpha) * R)
 println("  M_max = $M_exp,  x0 = $(round(x0_exp/lambda, digits=1)) λ")
 
-Er_ob     = [lens_phase(rv) * inc_phase(rv, th, alpha)
+# Ideal oblique lens: exp(-ik[√((r cosθ − x₀)² + r² sin²θ + f²) − f])
+# Produces a perfect converging spherical wave → should give Airy disk.
+Er_ob     = [ideal_oblique_lens(rv, th, alpha) * cos(th)
              for rv in r, th in theta]
-Etheta_ob = zeros(ComplexF64, Nr, Ntheta)
+Etheta_ob = [-ideal_oblique_lens(rv, th, alpha) * sin(th)
+             for rv in r, th in theta]
 
 psf_ob, rho_ob, psi_ob = cyfft_farfield(
-    complex.(Er_ob), Etheta_ob, collect(r), k, alpha, f;
+    complex.(Er_ob), complex.(Etheta_ob), collect(r), k, alpha, f;
     M_buffer=5, L_max=12, Npsi=64)
 
 I_ob    = abs2.(psf_ob)
 peak_ob = argmax(I_ob)
 rho_pk2 = rho_ob[peak_ob[1]]
-# Oblique Airy radius: effective NA is reduced because the focal spot
-# is at distance f/cos(α) from the aperture, not f.
+# Effective NA: aperture subtends a smaller angle from the off-axis
+# focal spot at distance f/cos(α) from the aperture centre.
 NA_ob   = R * cos(alpha) / sqrt((R * cos(alpha))^2 + f^2)
 airy_ob = 0.61 * lambda / NA_ob
 println("  PSF peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ in local frame")
@@ -204,21 +221,65 @@ println("  Full  peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
 @assert abs(rho_pk3 - rho_pk2) < 0.01 * lambda "Modal and full-field peaks disagree"
 println("  PASSED ✓")
 
-# ─── Test 8: Analytical Jacobi-Anger + Airy disk validation ──────
-println("\n--- Test 8: Analytical modal input + Airy disk check ---")
+# ─── Test 8: Airy disk validation (ideal oblique lens from Test 5) ─
+println("\n--- Test 8: Airy disk validation of ideal oblique lens ---")
+# The ideal oblique lens (Test 5) produces a perfect converging spherical
+# wave → its PSF should be an Airy disk.  We validate three properties.
+
+# --- 8a: Circular symmetry (ψ-independence) ---
+I_psi_avg = mean(I_ob, dims=2)[:, 1]
+I_psi_std = [std(I_ob[j, :]) for j in 1:size(I_ob, 1)]
+peak_I    = maximum(I_psi_avg)
+sig_rows  = findall(I_psi_avg .> 0.01 * peak_I)
+if !isempty(sig_rows)
+    max_aniso = maximum(I_psi_std[sig_rows] ./ (I_psi_avg[sig_rows] .+ 1e-30))
+    println("  Max azimuthal variation (I > 1% peak): $(round(max_aniso, sigdigits=3))")
+    @assert max_aniso < 0.15 "PSF is not circularly symmetric"
+end
+println("  8a: Circular symmetry ✓")
+
+# --- 8b: Airy dark ring location ---
+# Theoretical: I(ρ) ∝ [2 J₁(v) / v]²  where v = k·NA_eff·ρ.
+# First zero at v₁ = 3.8317 → ρ₁ = 3.8317/(k·NA_eff).
+rho_airy1 = 3.8317 / (k * NA_ob)
+println("  Expected Airy first zero = $(round(rho_airy1/lambda, digits=3)) λ  " *
+        "(NA_eff = $(round(NA_ob, digits=4)))")
+
+I_rad = real.(I_psi_avg)
+found_min = false
+for j in 2:length(I_rad)-1
+    if I_rad[j] < I_rad[j-1] && I_rad[j] < I_rad[j+1] && I_rad[j] < 0.1 * peak_I
+        rho_min = rho_ob[j]
+        rel_err = abs(rho_min - rho_airy1) / rho_airy1
+        println("  First dark ring at ρ = $(round(rho_min/lambda, digits=3)) λ  " *
+                "(error = $(round(100*rel_err, digits=1))%)")
+        @assert rel_err < 0.30 "Airy first zero location off by > 30%"
+        found_min = true
+        break
+    end
+end
+if !found_min
+    println("  WARNING: Could not locate first dark ring (log-grid may be too coarse)")
+end
+println("  8b: Airy dark ring ✓")
+println("  PASSED ✓")
+
+# ─── Test 9: Analytical Jacobi-Anger decomposition ───────────────
+println("\n--- Test 9: Analytical modal input (Jacobi-Anger) ---")
 # For u(r) exp(i k_x r cos θ) (cos θ r̂ − sin θ θ̂), the angular modes are:
 #   E_{m,r}(r)  = u(r)/2 [i^{m-1} J_{m-1}(k_x r) + i^{m+1} J_{m+1}(k_x r)]
 #   E_{m,θ}(r)  = u(r)·i/2 [i^{m-1} J_{m-1}(k_x r) − i^{m+1} J_{m+1}(k_x r)]
-# No FFT over θ needed.
+# This is a normal-incidence lens + oblique plane wave (NOT the ideal oblique
+# lens), used here to validate the analytical decomposition workflow.
 
 alpha_a  = deg2rad(11.0)
 k_x      = k * sin(alpha_a)
 M_max_a  = ceil(Int, k_x * R) + 5
-u_lens(rv) = lens_phase(rv)   # ideal lens transmission
+u_lens(rv) = lens_phase(rv)   # normal-incidence ideal lens
+rv       = collect(r)
 
 Em_r_a   = zeros(ComplexF64, Nr, M_max_a + 1)
 Em_th_a  = zeros(ComplexF64, Nr, M_max_a + 1)
-rv       = collect(r)
 
 for (idx, m) in enumerate(0:M_max_a)
     Jmm1 = besselj.(m - 1, k_x .* rv)
@@ -229,81 +290,34 @@ for (idx, m) in enumerate(0:M_max_a)
     Em_th_a[:, idx] .= u_lens.(rv) .* im ./ 2 .* (c1 .* Jmm1 .- c2 .* Jmp1)
 end
 
-# Use larger L_max for accurate Airy profile
 psf_a, rho_a, psi_a = cyfft_farfield_modal(
     Em_r_a, Em_th_a, rv, k, alpha_a, f;
-    L_max=20, Npsi=64)
+    L_max=12, Npsi=64)
 
 I_a     = abs2.(psf_a)
 peak_a  = argmax(I_a)
 rho_pka = rho_a[peak_a[1]]
-println("  PSF peak at ρ = $(round(rho_pka/lambda, digits=4)) λ")
+println("  Jacobi-Anger PSF peak at ρ = $(round(rho_pka/lambda, digits=4)) λ")
 
-# --- 8a: Peak location matches FFT-decomposed Test 5 ---
-println("  FFT-decomposed peak at ρ = $(round(rho_pk2/lambda, digits=4)) λ")
-@assert abs(rho_pka - rho_pk2) < 0.1 * lambda "Analytical and FFT-based modal peaks disagree"
-println("  8a: Peaks agree ✓")
-
-# --- 8b: Circular symmetry (ψ-independence) ---
-# At each ρ, the intensity should be nearly constant over ψ
-I_psi_avg = mean(I_a, dims=2)[:, 1]
-I_psi_std = [std(I_a[j, :]) for j in 1:size(I_a, 1)]
-peak_I    = maximum(I_psi_avg)
-# Relative azimuthal variation should be small where the signal is significant
-sig_rows  = findall(I_psi_avg .> 0.01 * peak_I)
-if !isempty(sig_rows)
-    max_aniso = maximum(I_psi_std[sig_rows] ./ (I_psi_avg[sig_rows] .+ 1e-30))
-    println("  Max azimuthal variation (I > 1% peak): $(round(max_aniso, sigdigits=3))")
-    @assert max_aniso < 0.15 "PSF is not circularly symmetric"
-end
-println("  8b: Circular symmetry ✓")
-
-# --- 8c: Airy disk profile ---
-# Theoretical: I(ρ) ∝ [2 J₁(v) / v]²  where v = k·NA_eff·ρ.
-#
-# For oblique incidence the focal spot is at distance f/cos(α) from
-# the aperture centre (not f), so the aperture subtends a smaller
-# half-angle and the effective NA is reduced:
-#
-#   NA_eff = R cos(α) / √(R² cos²(α) + f²)
-#
-# This reduces to R/√(R²+f²) at normal incidence.
-NA_normal = R / sqrt(R^2 + f^2)
-NA_eff    = R * cos(alpha_a) / sqrt((R * cos(alpha_a))^2 + f^2)
-rho_airy1 = 3.8317 / (k * NA_eff)
-println("  NA (normal) = $(round(NA_normal, digits=4)),  " *
-        "NA_eff (α=$(round(rad2deg(alpha_a), digits=1))°) = $(round(NA_eff, digits=4))")
-println("  Airy first zero (oblique) = $(round(rho_airy1/lambda, digits=3)) λ  " *
-        "(normal would be $(round(3.8317/(k*NA_normal)/lambda, digits=3)) λ)")
-
-# Check: the ψ-averaged radial profile should have a local minimum near ρ_airy1
-# Find local minima in the ψ-averaged profile
-I_rad = real.(I_psi_avg)
-found_min = false
-for j in 2:length(I_rad)-1
-    if I_rad[j] < I_rad[j-1] && I_rad[j] < I_rad[j+1] && I_rad[j] < 0.1 * peak_I
-        rho_min = rho_a[j]
-        rel_err = abs(rho_min - rho_airy1) / rho_airy1
-        println("  First dark ring at ρ = $(round(rho_min/lambda, digits=3)) λ  " *
-                "(expected $(round(rho_airy1/lambda, digits=3)) λ, " *
-                "error = $(round(100*rel_err, digits=1))%)")
-        @assert rel_err < 0.30 "Airy first zero location off by > 30%"
-        found_min = true
-        break
-    end
-end
-if !found_min
-    println("  WARNING: Could not locate first dark ring (log-grid may be too coarse)")
-end
-println("  8c: Airy profile ✓")
+# Cross-check: the FFT of the same field should give the same result
+Er_ja     = [lens_phase(rv_) * inc_phase(rv_, th, alpha_a)
+             for rv_ in r, th in theta]
+Etheta_ja = zeros(ComplexF64, Nr, Ntheta)
+psf_ja_fft, _, _ = cyfft_farfield(
+    complex.(Er_ja), Etheta_ja, collect(r), k, alpha_a, f;
+    M_buffer=5, L_max=12, Npsi=64)
+peak_ja_fft = argmax(abs2.(psf_ja_fft))
+rho_pk_ja   = rho_a[peak_ja_fft[1]]
+println("  FFT-decomposed  PSF peak at ρ = $(round(rho_pk_ja/lambda, digits=4)) λ")
+@assert abs(rho_pka - rho_pk_ja) < 0.1 * lambda "Analytical and FFT-based peaks disagree"
 println("  PASSED ✓")
 
-# ─── Test 9: Graf convergence vs L_max ──────────────────────────
-println("\n--- Test 9: Convergence with L_max ---")
-println("  (Peak intensity vs L_max for alpha=11° lens)")
+# ─── Test 10: Graf convergence vs L_max ─────────────────────────
+println("\n--- Test 10: Convergence with L_max ---")
+println("  (Peak intensity vs L_max for ideal oblique lens)")
 for Lm in [2, 5, 10, 15, 20]
     psf_l, _, _ = cyfft_farfield(
-        complex.(Er_ob), Etheta_ob, collect(r), k, alpha, f;
+        complex.(Er_ob), complex.(Etheta_ob), collect(r), k, alpha, f;
         M_buffer=5, L_max=Lm, Npsi=32)
     I_pk = maximum(abs2.(psf_l))
     println("  L_max=$Lm: peak = $(round(I_pk, sigdigits=5))")
