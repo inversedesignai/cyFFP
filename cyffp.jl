@@ -118,8 +118,8 @@ struct _FFTLogWorkspace
     buf::Vector{ComplexF64}      # work buffer (FFT/IFFT in-place)
     U_c::Vector{ComplexF64}      # kernel buffer (rewritten per order)
     q::Vector{Float64}           # DFT frequency indices (fixed for given N, dln)
-    pfft!::Any                   # in-place FFT plan
-    pifft!::Any                  # in-place IFFT plan
+    pfft!::Any                   # in-place FFT plan (MEASURE)
+    pifft!::Any                  # in-place IFFT plan (MEASURE)
 end
 
 function _make_workspace(N::Int, dln::Float64)
@@ -127,9 +127,97 @@ function _make_workspace(N::Int, dln::Float64)
     U_c  = zeros(ComplexF64, N)
     n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
     q    = @. (2π / (N * dln)) * n_idx
-    pfft!  = plan_fft!(buf)
-    pifft! = plan_ifft!(buf)
+    # FFTW.MEASURE benchmarks several FFT algorithms and picks the fastest.
+    # Plan creation is slower (~1s) but each FFT execution is 20-50% faster.
+    pfft!  = plan_fft!(buf; flags=FFTW.MEASURE)
+    pifft! = plan_ifft!(buf; flags=FFTW.MEASURE)
     return _FFTLogWorkspace(N, buf, U_c, q, pfft!, pifft!)
+end
+
+"""
+    _precompute_kernels(q, m_orders) -> Matrix{ComplexF64}
+
+Precompute FFTLog filter kernels for all Bessel orders using the
+recurrence U_{m+2}(q) = U_m(q) × (m+1+iq)/(m+1-iq).
+
+Only orders ≥ 0 are computed.  Negative orders are handled at the
+call site via J_{-n} = (-1)^n J_n.
+
+Base cases U_0, U_1 use loggamma.  All subsequent orders use the
+recurrence (simple complex multiplication, ~40× faster than loggamma).
+"""
+function _precompute_kernels(q::Vector{Float64}, m_orders::Vector{Int})
+    N = length(q)
+    M_max = maximum(m_orders)
+    @assert minimum(m_orders) >= 0 "Only non-negative orders supported"
+
+    # Compute base cases via loggamma
+    kernels = zeros(ComplexF64, N, M_max + 1)
+
+    for m_base in 0:min(1, M_max)
+        nu = Float64(m_base)
+        @inbounds for i in 1:N
+            qj = q[i]
+            a = complex((nu + 1.0) / 2, +qj / 2)
+            b = complex((nu + 1.0) / 2, -qj / 2)
+            kernels[i, m_base + 1] = exp(loggamma(a) - loggamma(b) + im * qj * log(2.0))
+        end
+    end
+
+    # Recurrence: U_{m+2}(q) = U_m(q) × (m+1+iq)/(m+1-iq)
+    # Derived from Γ(z+1) = zΓ(z) applied to the kernel ratio.
+    for m in 2:M_max
+        m_prev = m - 2  # same-parity predecessor
+        c = Float64(m_prev + 1)
+        @inbounds for i in 1:N
+            kernels[i, m + 1] = kernels[i, m_prev + 1] * complex(c, q[i]) / complex(c, -q[i])
+        end
+    end
+
+    return kernels
+end
+
+"""
+    _fftlog_with_kernel!(out, ws, f_r, kernel, neg_sign)
+
+FFTLog Hankel transform using a pre-computed kernel vector.
+Zero allocations.  `neg_sign` is ±1 for the J_{-n} = (-1)^n J_n sign.
+"""
+function _fftlog_with_kernel!(out::AbstractVector{ComplexF64},
+                               ws::_FFTLogWorkspace,
+                               f_r::AbstractVector,
+                               kernel::AbstractVector{ComplexF64},
+                               neg_sign::Int)
+    N = ws.N
+
+    # Copy input into work buffer
+    @inbounds for i in 1:N
+        ws.buf[i] = ComplexF64(f_r[i])
+    end
+
+    # In-place FFT
+    ws.pfft! * ws.buf
+
+    # Multiply by pre-computed kernel in-place
+    @inbounds for i in 1:N
+        ws.buf[i] *= kernel[i]
+    end
+
+    # In-place IFFT
+    ws.pifft! * ws.buf
+
+    # Reverse into output with optional sign
+    if neg_sign == 1
+        @inbounds for i in 1:N
+            out[i] = ws.buf[N - i + 1]
+        end
+    else
+        @inbounds for i in 1:N
+            out[i] = -ws.buf[N - i + 1]
+        end
+    end
+
+    return out
 end
 
 """
@@ -285,9 +373,15 @@ function compute_scalar_coeffs(u_m::Matrix{ComplexF64},
 
     a_m = zeros(ComplexF64, Nr, N_modes)
 
-    # Pre-allocate one workspace per thread (in-place FFTW plans + buffers).
-    # Use maxthreadid() to cover all possible thread IDs (Julia 1.12+
-    # separates interactive thread 1 from compute threads 2+).
+    # Precompute all FFTLog kernels via recurrence (sequential, ~40× faster
+    # than per-call loggamma).  Kernels are for |m| (non-negative); negative
+    # orders use J_{-n} = (-1)^n J_n sign flip.
+    m_abs_max = maximum(abs, m_pos)
+    n_idx = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
+    q     = @. (2π / (Nr * dln)) * n_idx
+    kernels = _precompute_kernels(q, collect(0:m_abs_max))
+
+    # Pre-allocate one workspace per thread (in-place FFTW MEASURE plans).
     nt = Threads.maxthreadid()
     workspaces = [_make_workspace(Nr, dln) for _ in 1:nt]
     g_bufs     = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
@@ -298,14 +392,17 @@ function compute_scalar_coeffs(u_m::Matrix{ComplexF64},
         g   = g_bufs[tid]
 
         m = m_pos[idx]
+        m_abs    = abs(m)
+        neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
 
         # g = r × u_m (Hankel integrand with r dr measure) — zero-alloc
         @inbounds for j in 1:Nr
             g[j] = r[j] * u_m[j, idx]
         end
 
-        # FFTLog returns kr × H_m[g](kr) — zero-alloc via workspace
-        _fftlog_hankel!(view(a_m, :, idx), ws, g, Float64(m))
+        # FFTLog with pre-computed kernel — zero-alloc, no loggamma
+        _fftlog_with_kernel!(view(a_m, :, idx), ws, g,
+                             view(kernels, :, m_abs + 1), neg_sign)
 
         # Divide by kr to get a_m — zero-alloc
         @inbounds for j in 1:Nr
@@ -567,6 +664,12 @@ function inverse_hankel(B::Matrix{ComplexF64},
 
     b = zeros(ComplexF64, Nkr, Nl)
 
+    # Precompute kernels for orders 0..L_max via recurrence.
+    # Negative orders use kernel at |l| with sign (-1)^|l|.
+    n_idx = [n <= (Nkr-1)÷2 ? n : n - Nkr for n in 0:Nkr-1]
+    q     = @. (2π / (Nkr * dln)) * n_idx
+    kernels = _precompute_kernels(q, collect(0:L_max))
+
     # Pre-allocate one workspace per thread.
     nt = Threads.maxthreadid()
     workspaces = [_make_workspace(Nkr, dln) for _ in 1:nt]
@@ -578,13 +681,18 @@ function inverse_hankel(B::Matrix{ComplexF64},
         f   = f_bufs[tid]
         l   = li - L_max - 1
 
+        # For negative l: use kernel at |l| with sign (-1)^|l|
+        l_abs    = abs(l)
+        neg_sign = (l < 0 && isodd(l_abs)) ? -1 : 1
+
         # f = kr × B_l (pre-multiply for kr dkr measure) — zero-alloc
         @inbounds for j in 1:Nkr
             f[j] = kr_grid[j] * B[j, li]
         end
 
-        # FFTLog returns ρ × b_l(ρ) — zero-alloc via workspace
-        _fftlog_hankel!(view(b, :, li), ws, f, Float64(l))
+        # FFTLog with pre-computed kernel — zero-alloc
+        _fftlog_with_kernel!(view(b, :, li), ws, f,
+                             view(kernels, :, l_abs + 1), neg_sign)
 
         # Divide by ρ to get b_l(ρ) — zero-alloc
         @inbounds for j in 1:Nkr
