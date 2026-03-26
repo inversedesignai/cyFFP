@@ -524,7 +524,13 @@ entry flips sign).  Squaring: $(-\mathcal{D}_m)^2 = \mathcal{D}_m^2$.  \checkmar
 
 \medskip
 \noindent
-Both cases were verified by symbolic computation (Mathematica; see cyFFP0 Fig.~1).
+Both cases can be verified by symbolic computation in Mathematica:
+\begin{verbatim}
+  D1 = {{0, -z, t}, {z, 0, -r}, {-t, rr, 0}};    (* D_m with im/r -> t *)
+  D2 = {{0, -z, -t}, {z, 0, -r}, {t, rr, 0}};     (* D_{-m} *)
+  S  = DiagonalMatrix[{-1, 1, 1}];                  (* y-pol sigma *)
+  Simplify[S.D2.D2.S - D1.D1]   (* == zero matrix *)
+\end{verbatim}
 The key point: $\hat\sigma^2 = I$ and $s_r s_\theta = -1$ guarantee that the
 curl-curl operator is invariant under the combined transformation
 $m \to -m$, $\E \to \hat\sigma\E$.
