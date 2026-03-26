@@ -149,6 +149,45 @@ for m in test_modes
     println("  m=$(lpad(m, 4)):  max_err=$(round(err, sigdigits=3)),  median_err=$(round(med_err, sigdigits=3)),  scale=$(round(sc, sigdigits=6)),  |g|_max=$(round(g_max, sigdigits=3))")
 end
 
+# ─── Test: compute_TE_TM_coeffs at production scale ───────────
+println("\n--- compute_TE_TM_coeffs at production scale (one mode at a time) ---")
+# Full M_max=4385 in one shot needs ~37 GB — must process per-mode.
+# This also tests the interface with single-mode [Nr,1] arrays.
+
+full_mem_GB = 4 * Nr * (M_max + 1) * 16 / 1e9
+println("  Full M_max=$M_max would need ≈$(round(full_mem_GB, digits=1)) GB → process per-mode")
+
+for m in [1, 100, 1000, 4000]
+    Em_r_m, Em_th_m = make_mode(m, r_vec, 0.0)
+    Em_r_1  = reshape(Em_r_m, Nr, 1)
+    Em_th_1 = reshape(Em_th_m, Nr, 1)
+
+    t_m = @elapsed begin
+        A_TE_1, A_TM_1, kr_prod = compute_TE_TM_coeffs(Em_r_1, Em_th_1, [m], r_vec, k)
+    end
+
+    @assert !any(isnan, A_TE_1) "NaN in A^TE for m=$m"
+    @assert !any(isnan, A_TM_1) "NaN in A^TM for m=$m"
+
+    # TM evanescent check
+    evan = findall(kr_prod .> k * 1.1)
+    tm_evan = isempty(evan) ? 0.0 : maximum(abs.(A_TM_1[evan, 1]))
+    @assert tm_evan < 1e-10 "TM not zeroed for m=$m"
+
+    # Propagating-band magnitudes
+    prop = findall(0.5 .< kr_prod .< k * 0.9)
+    ate_rms = sqrt(sum(abs2.(A_TE_1[prop, 1])) / length(prop))
+    atm_rms = sqrt(sum(abs2.(A_TM_1[prop, 1])) / length(prop))
+
+    println("  m=$(lpad(m, 4)): $(round(t_m, digits=2))s, |A^TE|=$(round(ate_rms, sigdigits=3)), |A^TM|=$(round(atm_rms, sigdigits=3)), TM_evan=$(round(tm_evan, sigdigits=2))")
+end
+println("  All per-mode checks passed ✓")
+println("\n  IMPORTANT: production pipeline must process modes in batches")
+println("  (e.g., 100 at a time) or use the Neumann shift path to avoid OOM.")
+
+println("  PASSED ✓")
+
+
 println("\n" * "="^60)
 println("Production aperture test complete.")
 println("="^60)
