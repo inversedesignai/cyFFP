@@ -11,7 +11,7 @@ module CyFFP
 using FFTW
 using SpecialFunctions: loggamma
 
-export angular_decompose, fftlog_hankel, compute_TE_TM_coeffs
+export angular_decompose, fftlog_hankel, compute_TE_TM_coeffs, propagate_and_symmetrize
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -250,6 +250,79 @@ function compute_TE_TM_coeffs(Em_r::Matrix{ComplexF64},
     end
 
     return A_TE, A_TM, kr_grid
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Step 3 — Propagation + Negative-m Symmetry Reconstruction
+#
+# Propagation:
+#   Ã_m(kr) = [A^TE_m(kr) + A^TM_m(kr)] · exp(ikz f)
+#   kz = √(k² - kr²),  zeroed for kr > k (evanescent).
+#
+# Symmetry (from §6 of the tex, E_{-m} = σ̂ E_m):
+#   y-pol: Ã_{-m} = (-1)^m (A^TE_m − A^TM_m) · exp(ikz f)
+#   x-pol: Ã_{-m} = (-1)^m (A^TM_m − A^TE_m) · exp(ikz f)
+#
+# Input:  A_TE, A_TM  [Nkr × (M_max+1)]  for m = 0,...,M_max
+# Output: A_tilde     [Nkr × (2M_max+1)]  for m = -M_max,...,M_max
+#         m_full = [-M_max, ..., -1, 0, 1, ..., M_max]
+#         Column index j corresponds to mode m = j - M_max - 1
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    propagate_and_symmetrize(A_TE, A_TM, m_pos, kr_grid, k, f; polarization=:y)
+    -> (A_tilde, m_full)
+
+Combine TE+TM, apply propagation phase exp(ikz f), and reconstruct
+negative-m modes via symmetry.
+
+Returns A_tilde[Nkr, 2M_max+1] for m = -M_max:M_max.
+Column j corresponds to mode m = j - M_max - 1.
+
+`polarization` selects the symmetry sign:
+- `:y` (s-pol, default): Ã_{-m} = (-1)^m (A^TE - A^TM) · prop
+- `:x` (p-pol):          Ã_{-m} = (-1)^m (A^TM - A^TE) · prop
+"""
+function propagate_and_symmetrize(A_TE::Matrix{ComplexF64},
+                                   A_TM::Matrix{ComplexF64},
+                                   m_pos::Vector{Int},
+                                   kr_grid::Vector{Float64},
+                                   k::Float64, f::Float64;
+                                   polarization::Symbol = :y)
+    @assert polarization in (:x, :y) "polarization must be :x or :y"
+    M_max = m_pos[end]
+    Nkr   = length(kr_grid)
+
+    # Propagation phase: exp(ikz f) for propagating, 0 for evanescent
+    kz   = @. sqrt(complex(k^2 - kr_grid^2))
+    prop = @. ifelse(kr_grid < k, exp(im * real(kz) * f), zero(ComplexF64))
+
+    N_full  = 2M_max + 1
+    A_tilde = zeros(ComplexF64, Nkr, N_full)
+    m_full  = collect(-M_max:M_max)
+
+    for (ip, m) in enumerate(m_pos)
+        ate = @view A_TE[:, ip]
+        atm = @view A_TM[:, ip]
+
+        # Positive mode: Ã_m = (A^TE_m + A^TM_m) · prop
+        idx_pos = m + M_max + 1
+        A_tilde[:, idx_pos] .= (ate .+ atm) .* prop
+
+        # Negative mode via symmetry
+        if m > 0
+            idx_neg = -m + M_max + 1
+            s = iseven(m) ? 1.0 : -1.0   # (-1)^m
+            if polarization == :y
+                A_tilde[:, idx_neg] .= s .* (ate .- atm) .* prop
+            else  # :x
+                A_tilde[:, idx_neg] .= s .* (atm .- ate) .* prop
+            end
+        end
+    end
+
+    return A_tilde, m_full
 end
 
 end  # module CyFFP
