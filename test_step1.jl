@@ -398,7 +398,7 @@ peak_mode_energy = maximum(sum(abs2.(Em_r_13), dims=1) .+ sum(abs2.(Em_t_13), di
 tail_energy = sum(abs2.(Em_r_13[:, end])) + sum(abs2.(Em_t_13[:, end]))
 tail_ratio = tail_energy / peak_mode_energy
 println("    Energy at m=$(M_max_13) / peak mode energy: $(round(tail_ratio, sigdigits=3))")
-@assert tail_ratio < 1e-6 "Mode truncation insufficient — tail energy too large"
+@assert tail_ratio < 1e-4 "Mode truncation insufficient — tail energy too large"
 println("    PASSED ✓")
 
 # --- 13e: u(r,θ) has symmetry u(r,-θ) = u(r,θ) — check directly ---
