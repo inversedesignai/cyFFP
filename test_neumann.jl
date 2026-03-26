@@ -274,6 +274,168 @@ println("  (Speedup increases with M_max; production M_max≈4385 → ~100×+)")
 println("  PASSED ✓")
 
 
+# ─── Test 7: Large-aperture validation (R=1000λ, 558 modes) ──
+println("\n--- Test 7: R=1000λ, α=5° — Neumann vs standard (per-r FFT) ---")
+R_7     = 1000.0
+f_7     = R_7 / 0.3 * sqrt(1 - 0.3^2)
+alpha_7 = deg2rad(5.0)
+kx_7    = k * sin(alpha_7)
+x0_7    = f_7 * tan(alpha_7)
+M_max_7 = ceil(Int, kx_7 * R_7) + 10
+L_max_7 = 10
+
+Nr_7     = 2^16
+r_7      = collect(exp.(range(log(1e-4), log(1e6), length=Nr_7)))
+dln_7    = log(r_7[2] / r_7[1])
+kr_7     = exp.(log(1.0 / r_7[end]) .+ dln_7 .* (0:Nr_7-1))
+m_pos_7  = collect(0:M_max_7)
+
+println("  Nr=$Nr_7, M_max=$M_max_7, Δr(R)=$(round(R_7*dln_7, sigdigits=3))λ")
+
+# Standard path: extract LPA modes via per-r FFT (skips Step 1)
+t_lens_7(rv) = exp(-im * k * (sqrt(rv^2 + f_7^2) - f_7)) * (rv <= R_7 ? 1.0 : 0.0)
+
+Ntheta_7 = max(2 * M_max_7 + 1, 4096)
+Ntheta_7 = 1 << ceil(Int, log2(Ntheta_7))
+
+u_m_std7 = zeros(ComplexF64, Nr_7, M_max_7 + 1)
+u_row_7  = Vector{ComplexF64}(undef, Ntheta_7)
+for j in 1:Nr_7
+    rv = r_7[j]
+    t_val = t_lens_7(rv)
+    abs(t_val) < 1e-30 && continue
+    for it in 1:Ntheta_7
+        u_row_7[it] = t_val * exp(im * kx_7 * rv * cos(2π * (it-1) / Ntheta_7))
+    end
+    fft!(u_row_7)
+    u_row_7 ./= Ntheta_7
+    for (idx, m) in enumerate(m_pos_7)
+        u_m_std7[j, idx] = u_row_7[m + 1]
+    end
+end
+println("  Standard modes built (per-r FFT, Nθ=$Ntheta_7)")
+
+a_std7, _ = compute_scalar_coeffs(u_m_std7, m_pos_7, r_7)
+println("  Standard compute_scalar_coeffs done")
+
+# Neumann path
+t_r_7 = ComplexF64[t_lens_7(rv) for rv in r_7]
+a_neu7, _, _ = neumann_shift_coeffs(t_r_7, r_7, k, alpha_7, M_max_7)
+println("  Neumann neumann_shift_coeffs done")
+
+# 7a: Energy-weighted RMS on a_m
+prop7 = findall(0.5 .< kr_7 .< k * 0.9)
+rms7 = sqrt(sum(abs2.(a_std7[prop7, :] .- a_neu7[prop7, :])) /
+            sum(abs2.(a_std7[prop7, :])))
+println("  Energy-weighted RMS: $(round(100*rms7, digits=2))%")
+@assert rms7 < 0.03 "RMS too large at R=1000λ"
+
+# 7b: Brute-force PSF comparison through Steps 3-4
+# (Steps 3-4 only need a_m for positive modes, avoid full a_tilde allocation)
+# Compare at selected ρ points using B from graf_shift
+# Use small L_max to keep memory manageable
+L_7 = 8
+at_s7, mf_s7 = propagate_scalar(a_std7, m_pos_7, collect(kr_7), k, f_7)
+B_s7 = graf_shift(at_s7, mf_s7, collect(kr_7), x0_7, L_7; k=k)
+# Free a_tilde to save memory
+at_s7 = nothing; GC.gc()
+
+at_n7, mf_n7 = propagate_scalar(a_neu7, m_pos_7, collect(kr_7), k, f_7)
+B_n7 = graf_shift(at_n7, mf_n7, collect(kr_7), x0_7, L_7; k=k)
+at_n7 = nothing; GC.gc()
+
+prop_kr7 = findall(kr_7 .< k)
+rho_check = [0.001, 0.3, 0.7, 1.0, 1.5, 2.0, 2.5, 3.0]
+max_psf7 = 0.0
+for rho in rho_check
+    bf_s = zero(ComplexF64); bf_n = zero(ComplexF64)
+    for (li, l) in enumerate(-L_7:L_7)
+        bf_s += dln_7 * sum(B_s7[j, li] * besselj(l, kr_7[j] * rho) * kr_7[j]^2
+                            for j in prop_kr7)
+        bf_n += dln_7 * sum(B_n7[j, li] * besselj(l, kr_7[j] * rho) * kr_7[j]^2
+                            for j in prop_kr7)
+    end
+    err = abs(bf_s - bf_n) / (abs(bf_s) + 1e-30)
+    global max_psf7 = max(max_psf7, err)
+    println("  ρ=$(lpad(round(rho, digits=3), 5))λ: Δ=$(round(100*err, digits=2))%")
+end
+println("  Max PSF difference: $(round(100*max_psf7, digits=2))%")
+@assert max_psf7 < 0.01 "PSF mismatch > 1% at R=1000λ"
+println("  PASSED ✓")
+
+
+# ─── Test 8: Neumann at multiple angles (R=300λ) ─────────────
+println("\n--- Test 8: Neumann vs standard at α=5°..30° (R=300λ) ---")
+R_8  = 300.0
+f_8  = R_8 / 0.3 * sqrt(1 - 0.3^2)
+Nr_8 = 16384
+r_8  = collect(exp.(range(log(1e-3), log(1e5), length=Nr_8)))
+dln_8 = log(r_8[2] / r_8[1])
+kr_8  = exp.(log(1.0 / r_8[end]) .+ dln_8 .* (0:Nr_8-1))
+L_8   = 8
+
+t_lens_8(rv) = exp(-im * k * (sqrt(rv^2 + f_8^2) - f_8)) * (rv <= R_8 ? 1.0 : 0.0)
+t_r_8 = ComplexF64[t_lens_8(rv) for rv in r_8]
+
+for alpha_deg in [5, 10, 15, 20, 30]
+    alpha_8 = deg2rad(Float64(alpha_deg))
+    kx_8 = k * sin(alpha_8)
+    x0_8 = f_8 * tan(alpha_8)
+    M_max_8 = ceil(Int, kx_8 * R_8) + 10
+    m_pos_8 = collect(0:M_max_8)
+
+    Ntheta_8 = max(2*M_max_8+1, 128)
+    Ntheta_8 = 1 << ceil(Int, log2(Ntheta_8))
+    theta_8 = range(0.0, 2π, length=Ntheta_8+1)[1:end-1]
+
+    # Standard: 2D field + angular_decompose
+    u_f8 = ComplexF64[t_r_8[jr] * exp(im*kx_8*r_8[jr]*cos(th))
+                      for jr in 1:Nr_8, th in theta_8]
+    u_m8, _, _ = angular_decompose(u_f8, zeros(ComplexF64, Nr_8, Ntheta_8), M_max_8)
+    a_std8, _ = compute_scalar_coeffs(u_m8, m_pos_8, r_8)
+
+    # Neumann
+    a_neu8, _, _ = neumann_shift_coeffs(t_r_8, r_8, k, alpha_8, M_max_8)
+
+    # PSF comparison
+    at_s8, mf_s8 = propagate_scalar(a_std8, m_pos_8, collect(kr_8), k, f_8)
+    B_s8 = graf_shift(at_s8, mf_s8, collect(kr_8), x0_8, L_8; k=k)
+    at_n8, mf_n8 = propagate_scalar(a_neu8, m_pos_8, collect(kr_8), k, f_8)
+    B_n8 = graf_shift(at_n8, mf_n8, collect(kr_8), x0_8, L_8; k=k)
+
+    prop_kr8 = findall(kr_8 .< k)
+
+    # Compute PSF at several ρ and find the peak for normalization
+    rho_test8 = [0.001, 0.01, 0.1, 0.3, 0.5, 1.0, 1.5, 2.0, 3.0]
+    psf_s_vals = ComplexF64[]
+    psf_n_vals = ComplexF64[]
+    for rho in rho_test8
+        bf_s = zero(ComplexF64); bf_n = zero(ComplexF64)
+        for (li, l) in enumerate(-L_8:L_8)
+            bf_s += dln_8 * sum(B_s8[j,li]*besselj(l,kr_8[j]*rho)*kr_8[j]^2
+                                for j in prop_kr8)
+            bf_n += dln_8 * sum(B_n8[j,li]*besselj(l,kr_8[j]*rho)*kr_8[j]^2
+                                for j in prop_kr8)
+        end
+        push!(psf_s_vals, bf_s)
+        push!(psf_n_vals, bf_n)
+    end
+    # Normalize by peak PSF amplitude (not pointwise — avoids
+    # inflated errors at near-zeros of the aberrated PSF)
+    psf_peak8 = maximum(abs.(psf_s_vals))
+    max_psf8 = maximum(abs.(psf_s_vals .- psf_n_vals)) / psf_peak8
+
+    prop8 = findall(0.5 .< kr_8 .< k*0.9)
+    rms8 = sqrt(sum(abs2.(a_std8[prop8,:] .- a_neu8[prop8,:])) /
+                sum(abs2.(a_std8[prop8,:])))
+
+    status = max_psf8 < 0.05 ? "✓" : "✗"
+    println("  α=$(lpad(alpha_deg,2))° M=$(lpad(M_max_8,4)): RMS=$(lpad(round(100*rms8,digits=2),5))%  PSF Δ/peak=$(lpad(round(100*max_psf8,digits=2),5))%  $status")
+    @assert max_psf8 < 0.05 "PSF mismatch > 5% of peak at α=$(alpha_deg) deg"
+end
+println("  PASSED ✓")
+
+
 println("\n" * "="^60)
 println("All Neumann shift-theorem tests passed.")
 println("="^60)
