@@ -24,7 +24,8 @@ using SpecialFunctions: loggamma, besselj
 
 export angular_decompose, fftlog_hankel,
        compute_scalar_coeffs, neumann_shift_coeffs, propagate_scalar,
-       graf_shift, inverse_hankel, angular_synthesis
+       graf_shift, inverse_hankel, angular_synthesis,
+       compute_psf
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -896,6 +897,292 @@ function angular_synthesis(b::Matrix{ComplexF64},
     psi = collect(range(0.0, 2π, length=N_psi+1)[1:end-1])
 
     return u, psi
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# User-facing PSF driver for LPA metalens fields
+#
+# Accepts the radial transmission t(r) on a uniform grid (one value
+# per subwavelength unit cell) and the incidence angle.  Internally:
+#
+#   1. Resamples t(r) from the uniform cell grid to the FFTLog
+#      log-spaced grid via piecewise-constant lookup.
+#   2. Computes modes u_m(r) = i^m t(r) J_m(kₓr) via Jacobi-Anger
+#      + Miller backward recurrence (no θ-FFT needed).
+#   3. Runs the standard scalar pipeline (Steps 2-6).
+#   4. Interpolates the PSF onto a uniform Cartesian output grid.
+#
+# This bypasses Step 1 entirely, saving ~75% of the computation
+# time for mm-scale lenses.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    compute_psf(t_vals, pitch_um; kwargs...) -> NamedTuple
+
+Compute the PSF of an LPA metalens at oblique incidence.
+
+The metalens is described by its radial transmission `t_vals`,
+sampled at one value per unit cell of width `pitch_um`.  The field
+is assumed piecewise constant within each cell (LPA model).
+
+# Required arguments
+- `t_vals::Vector{ComplexF64}` : transmission per unit cell,
+  length N_cells.  Cell i is centered at r = (i-0.5)×pitch.
+  Aperture radius R = N_cells × pitch.
+- `pitch_um::Float64` : unit cell pitch in μm (e.g. 0.3)
+
+# Keyword arguments — physical
+- `lambda_um  = 0.5`    : wavelength in μm
+- `alpha_deg  = 0.0`    : incidence angle in degrees
+- `f_um       = NaN`    : focal length in μm (provide `f_um` OR `NA`)
+- `NA         = NaN`    : numerical aperture   (provide `f_um` OR `NA`)
+
+# Keyword arguments — numerical
+- `Nr         = 0`      : FFTLog radial grid size (0 = auto)
+- `L_max      = 15`     : local mode truncation (Step 4-6)
+- `N_psi      = 64`     : azimuthal points (Step 6)
+
+# Keyword arguments — output
+- `psf_half_width_um = NaN` : PSF output window half-size in μm
+                               (default: 5× sagittal Airy radius)
+- `Nxy        = 201`    : output grid size (Nxy × Nxy pixels)
+
+# Returns — NamedTuple
+- `I`       : PSF intensity, `Float64[Nxy, Nxy]`, normalized to peak = 1
+- `I_raw`   : unnormalized PSF intensity
+- `x_um`    : x grid in μm (length Nxy)
+- `y_um`    : y grid in μm (length Nxy)
+- `x_lambda`: x grid in units of λ
+- `y_lambda`: y grid in units of λ
+- `rho_airy_um`  : predicted sagittal Airy first-zero radius in μm
+- `peak_rho_um`  : ρ of PSF peak in μm
+- `timings`      : per-step wall times in seconds
+
+# Example
+```julia
+include("cyffp.jl"); using .CyFFP
+# Ideal thin lens: t(r) = exp(-ik[√(r²+f²) - f])
+pitch = 0.3  # μm
+R = 2000.0   # μm
+N_cells = round(Int, R / pitch)
+r_centers = [(i-0.5)*pitch for i in 1:N_cells]
+k = 2π / 0.5
+f = 4583.0  # μm (NA ≈ 0.4)
+t = ComplexF64[exp(-im*k*(sqrt(r^2+f^2)-f)) for r in r_centers]
+
+result = compute_psf(t, pitch; lambda_um=0.5, alpha_deg=30.0, f_um=f)
+# result.I is the 2D PSF, result.x_um and result.y_um are the axes
+```
+"""
+function compute_psf(t_vals::Vector{ComplexF64},
+                     pitch_um::Float64;
+                     lambda_um::Float64   = 0.5,
+                     alpha_deg::Float64   = 0.0,
+                     f_um::Float64        = NaN,
+                     NA::Float64          = NaN,
+                     Nr::Int              = 0,
+                     L_max::Int           = 15,
+                     N_psi::Int           = 64,
+                     psf_half_width_um::Float64 = NaN,
+                     Nxy::Int             = 201)
+
+    # ─── Derived parameters ──────────────────────────────────
+    N_cells = length(t_vals)
+    R       = N_cells * pitch_um
+    k       = 2π / lambda_um
+    alpha   = deg2rad(alpha_deg)
+    kx      = k * sin(alpha)
+
+    # Focal length: user provides f_um or NA (exactly one)
+    if !isnan(f_um) && !isnan(NA)
+        error("Provide f_um OR NA, not both")
+    elseif !isnan(NA)
+        f_val = R * sqrt(1/NA^2 - 1)
+    elseif !isnan(f_um)
+        f_val = f_um
+    else
+        error("Must provide either f_um or NA")
+    end
+
+    x0    = f_val * tan(alpha)
+    M_max = max(ceil(Int, kx * R) + 20, 5)
+    m_pos = collect(0:M_max)
+
+    NA_eff_sag = R * cos(alpha) / sqrt((R * cos(alpha))^2 + f_val^2)
+    rho_airy   = 0.61 * lambda_um / NA_eff_sag
+
+    if isnan(psf_half_width_um)
+        psf_half_width_um = 5.0 * rho_airy
+    end
+
+    println("CyFFP compute_psf")
+    println("  R = $R μm ($N_cells cells × $(pitch_um)μm pitch)")
+    println("  λ = $lambda_um μm,  α = $(alpha_deg)°,  f = $(round(f_val, digits=1)) μm")
+    println("  M_max = $M_max,  L_max = $L_max")
+    println("  Sagittal ρ_Airy = $(round(rho_airy, digits=4)) μm = $(round(rho_airy/lambda_um, digits=3))λ")
+
+    # ─── FFTLog grid setup ────────────────────────────────────
+    r_min = lambda_um / (20π)
+    r_max = 50 * R
+    if Nr == 0
+        dln_max = lambda_um / (2R)
+        Nr_min  = ceil(Int, log(r_max / r_min) / dln_max)
+        Nr = 1 << ceil(Int, log2(Nr_min))
+    end
+
+    r_log = collect(exp.(range(log(r_min), log(r_max), length=Nr)))
+    dln   = log(r_log[2] / r_log[1])
+    kr    = exp.(log(1.0 / r_log[end]) .+ dln .* (0:Nr-1))
+
+    @assert R * dln < lambda_um / 2 "Grid too coarse: Δr(R)=$(R*dln) ≥ λ/2=$(lambda_um/2)"
+    println("  Nr = $Nr,  Δr(R) = $(round(R*dln, sigdigits=3)) μm")
+
+    timings = Dict{String,Float64}()
+
+    # ─── Resample t(r) from uniform cells to log grid ─────────
+    # Piecewise constant: t(r) = t_vals[ceil(r/pitch)] for r ≤ R, 0 outside.
+    t_log = zeros(ComplexF64, Nr)
+    @inbounds for j in 1:Nr
+        rv = r_log[j]
+        rv > R && continue
+        i_cell = ceil(Int, rv / pitch_um)
+        i_cell = clamp(i_cell, 1, N_cells)
+        t_log[j] = t_vals[i_cell]
+    end
+
+    # ─── Compute modes u_m(r) = i^m t(r) J_m(kₓr) ───────────
+    # Uses Miller backward recurrence: one _besselj_range call per
+    # r gives ALL J_0..J_{M_max} at once.  Threaded over r.
+    println("  Building $(M_max+1) modes via Jacobi-Anger + Miller recurrence...")
+
+    u_m = zeros(ComplexF64, Nr, M_max + 1)
+    im_factors = [Complex(0.0, 1.0)^m for m in m_pos]
+
+    timings["modes"] = @elapsed begin
+        Threads.@threads for j in 1:Nr
+            rv = r_log[j]
+            tv = t_log[j]
+            abs(tv) < 1e-30 && continue
+
+            arg = kx * rv
+            Jm = _besselj_range(M_max, arg)
+
+            @inbounds for idx in 1:M_max+1
+                u_m[j, idx] = im_factors[idx] * tv * Jm[idx]
+            end
+        end
+    end
+    println("    $(round(timings["modes"], digits=1))s")
+
+    # ─── Step 2: scalar spectral coefficients ─────────────────
+    print("  Step 2 (FFTLog)... ")
+    timings["step2"] = @elapsed begin
+        a_m, kr_grid = compute_scalar_coeffs(u_m, m_pos, r_log)
+    end
+    println("$(round(timings["step2"], digits=1))s")
+    u_m = nothing; GC.gc()
+
+    # ─── Step 3: propagation + symmetry ───────────────────────
+    print("  Step 3 (propagate)... ")
+    timings["step3"] = @elapsed begin
+        a_tilde, m_full = propagate_scalar(a_m, m_pos, collect(kr_grid), k, f_val)
+    end
+    println("$(round(timings["step3"], digits=1))s")
+    a_m = nothing; GC.gc()
+
+    # ─── Step 4: Graf shift ───────────────────────────────────
+    print("  Step 4 (Graf shift)... ")
+    timings["step4"] = @elapsed begin
+        B = graf_shift(a_tilde, m_full, collect(kr_grid), x0, L_max; k=k)
+    end
+    println("$(round(timings["step4"], digits=1))s")
+    a_tilde = nothing; GC.gc()
+
+    # ─── Step 5: inverse Hankel ───────────────────────────────
+    print("  Step 5 (inverse Hankel)... ")
+    timings["step5"] = @elapsed begin
+        b, rho = inverse_hankel(B, L_max, collect(kr_grid))
+    end
+    println("$(round(timings["step5"], digits=1))s")
+
+    # ─── Step 6: angular synthesis ────────────────────────────
+    print("  Step 6 (synthesis)... ")
+    timings["step6"] = @elapsed begin
+        u_psf, psi = angular_synthesis(b, L_max, N_psi)
+    end
+    println("$(round(timings["step6"], digits=1))s")
+
+    I_polar = abs2.(u_psf)
+    t_total = sum(values(timings))
+    println("  Total: $(round(t_total, digits=1))s")
+
+    # ─── Interpolate to uniform Cartesian grid ────────────────
+    hw = psf_half_width_um
+    x_um = collect(range(-hw, hw, length=Nxy))
+    y_um = collect(range(-hw, hw, length=Nxy))
+
+    I_cart = zeros(Float64, Nxy, Nxy)
+    dpsi   = psi[2] - psi[1]
+
+    @inbounds for ix in 1:Nxy, iy in 1:Nxy
+        xv = x_um[ix]
+        yv = y_um[iy]
+        rv = sqrt(xv^2 + yv^2)
+        (rv < rho[1] || rv > rho[end]) && continue
+
+        pv = atan(yv, xv)
+        pv < 0 && (pv += 2π)
+
+        # Log-interpolate in ρ
+        lr  = log(rv)
+        lr0 = log(rho[1])
+        idx_r = (lr - lr0) / dln + 1.0
+        j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
+        wr = idx_r - j0
+
+        # Linear interpolate in ψ (with wrap-around)
+        idx_p = pv / dpsi + 1.0
+        p0    = clamp(floor(Int, idx_p), 1, N_psi)
+        p1    = p0 == N_psi ? 1 : p0 + 1
+        wp    = idx_p - p0
+
+        I_cart[iy, ix] = (
+            (1-wr)*(1-wp)*I_polar[j0, p0]  + wr*(1-wp)*I_polar[j0+1, p0] +
+            (1-wr)*wp    *I_polar[j0, p1]   + wr*wp    *I_polar[j0+1, p1]
+        )
+    end
+
+    I_raw  = copy(I_cart)
+    I_peak = maximum(I_cart)
+    I_peak > 0 && (I_cart ./= I_peak)
+
+    # Peak location
+    peak_idx = argmax(I_raw)
+    peak_x   = x_um[peak_idx[2]]
+    peak_y   = y_um[peak_idx[1]]
+    peak_rho = sqrt(peak_x^2 + peak_y^2)
+
+    println("  PSF peak at ($(round(peak_x, digits=3)), $(round(peak_y, digits=3))) μm  (ρ=$(round(peak_rho, digits=3)) μm)")
+
+    return (
+        I          = I_cart,
+        I_raw      = I_raw,
+        x_um       = x_um,
+        y_um       = y_um,
+        x_lambda   = x_um ./ lambda_um,
+        y_lambda   = y_um ./ lambda_um,
+        rho_airy_um = rho_airy,
+        peak_rho_um = peak_rho,
+        peak_xy_um  = (peak_x, peak_y),
+        R_um        = R,
+        alpha_deg   = alpha_deg,
+        lambda_um   = lambda_um,
+        f_um        = f_val,
+        M_max       = M_max,
+        Nr          = Nr,
+        timings     = timings,
+    )
 end
 
 end  # module CyFFP
