@@ -1818,49 +1818,67 @@ function psf_adjoint(plan::PSFPlan,
 
     a_bar = zeros(ComplexF64, Nr, M_max + 1)
 
+    # Per-thread local buffers for the scatter pattern (fits in L2)
+    nt_adj = _nworkspaces()
+    pos_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
+    neg_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
+    jw_bufs  = [Vector{Float64}(undef, 2(M_max + L_max) + 1) for _ in 1:nt_adj]
+
     Threads.@threads for ikr in 1:Nr
         kr_val = kr[ikr]
         kr_val > plan.k && continue
+
+        tid = Threads.threadid()
+        buf_pos = pos_bufs[tid]
+        buf_neg = neg_bufs[tid]
+        Jw      = jw_bufs[tid]
 
         kr_x0 = kr_val * plan.x0
         n_cut = min(M_max + L_max, ceil(Int, abs(kr_x0)) + 20)
         pc = prop_conj[ikr]
 
         Jp = _besselj_range(n_cut, kr_x0)
+        @inbounds for d in 0:n_cut
+            Jw[d + n_cut + 1] = Jp[d + 1]
+            Jw[-d + n_cut + 1] = iseven(d) ? Jp[d + 1] : -Jp[d + 1]
+        end
 
-        # Truncate: J_{m-l} = 0 for |m-l| > n_cut, so only modes
-        # with m ≤ n_cut + L_max have nonzero contributions.
-        # This is the same truncation as the forward graf_shift.
         m_eff = min(M_max, n_cut + L_max)
 
-        @inbounds for ip in 1:m_eff+1
-            m = m_pos[ip]
+        # Zero local buffers up to m_eff
+        @inbounds for m in 0:m_eff
+            buf_pos[m + 1] = zero(ComplexF64)
+            buf_neg[m + 1] = zero(ComplexF64)
+        end
 
-            # Compute ā_tilde_m = Σ_l B̄_l J_{m-l}
-            at_pos = zero(ComplexF64)
-            for (li, l) in enumerate(-L_max:L_max)
-                d = m - l
-                abs(d) > n_cut && continue
-                d_abs = abs(d)
-                jd = d >= 0 ? Jp[d_abs + 1] : (iseven(d_abs) ? Jp[d_abs + 1] : -Jp[d_abs + 1])
-                at_pos += B_bar[ikr, li] * jd
+        # Scatter pattern: l outer (31), m inner (up to M, @simd-able)
+        # ā_tilde_m   += B̄_l × Jw[m - l]    (positive)
+        # ā_tilde_{-m} += B̄_l × Jw[-m - l]   (negative)
+        @inbounds for (li, l) in enumerate(-L_max:L_max)
+            bl = B_bar[ikr, li]
+
+            # Positive sum: scatter bl * Jw[m-l] into buf_pos
+            m_lo_p = max(0, l - n_cut)
+            m_hi_p = min(m_eff, l + n_cut)
+            @simd for m in m_lo_p:m_hi_p
+                buf_pos[m + 1] += bl * Jw[m - l + n_cut + 1]
             end
 
-            if m == 0
-                a_bar[ikr, ip] = pc * at_pos
-            else
-                # Compute ā_tilde_{-m} = Σ_l B̄_l J_{-m-l}
-                at_neg = zero(ComplexF64)
-                for (li, l) in enumerate(-L_max:L_max)
-                    d = -m - l
-                    abs(d) > n_cut && continue
-                    d_abs = abs(d)
-                    jd = d >= 0 ? Jp[d_abs + 1] : (iseven(d_abs) ? Jp[d_abs + 1] : -Jp[d_abs + 1])
-                    at_neg += B_bar[ikr, li] * jd
-                end
+            # Negative sum: scatter bl * Jw[-m-l] into buf_neg
+            m_lo_n = max(0, -l - n_cut)
+            m_hi_n = min(m_eff, -l + n_cut)
+            @simd for m in m_lo_n:m_hi_n
+                buf_neg[m + 1] += bl * Jw[-m - l + n_cut + 1]
+            end
+        end
 
+        # Combine: ā_m = prop* × (ā_tilde_m + (-1)^m ā_tilde_{-m})
+        # For m=0: no negative counterpart (ā_tilde_0 is used once, not doubled)
+        @inbounds begin
+            a_bar[ikr, 1] = pc * buf_pos[1]
+            for m in 1:m_eff
                 s = iseven(m) ? 1 : -1
-                a_bar[ikr, ip] = pc * (at_pos + s * at_neg)
+                a_bar[ikr, m + 1] = pc * (buf_pos[m + 1] + s * buf_neg[m + 1])
             end
         end
     end
