@@ -78,10 +78,10 @@ function run_adjoint_production(;
         println("  M_max = $(plan.M_max),  Nr = $(plan.Nr)")
         println("  prepare_psf: $(round(t_prep, digits=1))s")
 
-        mem_GB = (sizeof(plan.Jm) + sizeof(plan.kernels) + sizeof(plan.kernels_conj)) / 1e9
+        mem_GB = (sizeof(plan.Jm) + sizeof(plan.kernels)) / 1e9
         println("  Plan memory: $(round(mem_GB, digits=1)) GB")
 
-        # ── Forward timing ──
+        # ── Forward timing: execute_psf path ──
         # Warmup
         I0 = psf_intensity(plan, t0)
         cy, cx = Nxy ÷ 2 + 1, Nxy ÷ 2 + 1  # center pixel
@@ -90,7 +90,27 @@ function run_adjoint_production(;
             psf_intensity(plan, t0)
         end
         t_fwd /= 3
-        println("  Forward: $(round(t_fwd, digits=1))s")
+        println("  Forward (execute_psf): $(round(t_fwd, digits=1))s")
+
+        # ── Forward timing: compute_scalar_coeffs path (for comparison) ──
+        # This is the same code path used in test_production_psf.jl.
+        # Build modes via Jacobi-Anger, then call compute_scalar_coeffs directly.
+        u_m_direct = zeros(ComplexF64, plan.Nr, plan.M_max + 1)
+        t_log_direct = zeros(ComplexF64, plan.Nr)
+        @inbounds for j in 1:plan.Nr
+            ic = plan.cell_idx[j]
+            ic > 0 && (t_log_direct[j] = t0[ic])
+        end
+        Threads.@threads for idx in 1:plan.M_max+1
+            @inbounds for j in 1:plan.Nr
+                u_m_direct[j, idx] = plan.im_factors[idx] * t_log_direct[j] * plan.Jm[j, idx]
+            end
+        end
+
+        compute_scalar_coeffs(u_m_direct, collect(0:plan.M_max), plan.r_log)  # warmup
+        t_cs = @elapsed compute_scalar_coeffs(u_m_direct, collect(0:plan.M_max), plan.r_log)
+        println("  compute_scalar_coeffs alone: $(round(t_cs, digits=1))s")
+        u_m_direct = nothing; GC.gc()
 
         # ── Zygote gradient timing ──
         # Strehl-like loss: -peak / total
@@ -139,6 +159,7 @@ function run_adjoint_production(;
             Nr       = plan.Nr,
             t_prep   = t_prep,
             t_fwd    = t_fwd,
+            t_cs     = t_cs,
             t_adj    = t_adj,
             ratio    = ratio,
             fd_err   = fd_err,
@@ -153,10 +174,10 @@ function run_adjoint_production(;
     println("\n" * "="^75)
     println("Summary")
     println("="^75)
-    println("  Label        R(μm)  N_cells  M_max      Nr   prep(s)  fwd(s)  adj(s)  ratio   FD_err   OK")
-    println("  " * "─"^90)
+    println("  Label        R(μm)  N_cells  M_max      Nr   prep(s)  fwd(s)  cs(s)   adj(s)  ratio   FD_err   OK")
+    println("  " * "─"^95)
     for r in results
-        println("  $(rpad(r.label, 12)) $(lpad(round(Int,r.R_um),6))  $(lpad(r.N_cells,7))  $(lpad(r.M_max,5))  $(lpad(r.Nr,6))  $(lpad(round(r.t_prep,digits=1),7))  $(lpad(round(r.t_fwd,digits=1),6))  $(lpad(round(r.t_adj,digits=1),6))  $(lpad(round(r.ratio,digits=2),5))×  $(lpad(round(r.fd_err,sigdigits=2),8))   $(r.passed ? "✓" : "✗")")
+        println("  $(rpad(r.label, 12)) $(lpad(round(Int,r.R_um),6))  $(lpad(r.N_cells,7))  $(lpad(r.M_max,5))  $(lpad(r.Nr,6))  $(lpad(round(r.t_prep,digits=1),7))  $(lpad(round(r.t_fwd,digits=1),6))  $(lpad(round(r.t_cs,digits=1),6))  $(lpad(round(r.t_adj,digits=1),6))  $(lpad(round(r.ratio,digits=2),5))×  $(lpad(round(r.fd_err,sigdigits=2),8))   $(r.passed ? "✓" : "✗")")
     end
     println("="^75)
 
