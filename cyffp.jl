@@ -25,7 +25,8 @@ using SpecialFunctions: loggamma, besselj
 export angular_decompose, fftlog_hankel,
        compute_scalar_coeffs, neumann_shift_coeffs, propagate_scalar,
        graf_shift, inverse_hankel, angular_synthesis,
-       compute_psf, prepare_psf, execute_psf, psf_adjoint
+       compute_psf, prepare_psf, execute_psf, psf_adjoint,
+       psf_intensity
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -1865,54 +1866,54 @@ function psf_adjoint(plan::PSFPlan,
 
     a_tilde_bar = nothing; GC.gc()
 
-    # ─── Step 3 adjoint: FFTLog ──────────────────────────────
-    # Forward: a_m = fftlog_m(r · u_m) / kr
-    # Adjoint: raw̄ = ā_m / kr → ḡ = adj_fftlog(raw̄, conj(U_m)) → ū_m = r · ḡ
-    u_bar_m = zeros(ComplexF64, Nr, M_max + 1)
+    # ─── Steps 3+2 fused adjoint: FFTLog + mode construction ──
+    # Forward Step 2: u_m = i^m t J_m → a_m = fftlog(r u_m) / kr
+    # Adjoint Step 3: ā_m/kr → adj_fftlog → ū_m = r ḡ
+    # Adjoint Step 2: t̄ += Σ_m conj(i^m) J_m ū_m
+    #
+    # Fused: as each mode's ū_m is computed (in per-thread g_bar),
+    # immediately accumulate into t_log_bar.  This avoids allocating
+    # u_bar_m[Nr, M+1] (~26 GB at production scale).
+    conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
 
-    # Reuse per-thread buffers from Step 6 (same size)
+    # Per-thread accumulators for t_log_bar (reduced after loop)
+    nt = Threads.maxthreadid()
+    t_log_bar_locals = [zeros(ComplexF64, Nr) for _ in 1:nt]
+
     Threads.@threads for idx in 1:M_max+1
         tid = Threads.threadid()
         ws  = plan.workspaces[tid]
         raw_bar = raw_bufs_adj[tid]
         g_bar   = f_bufs_adj[tid]
+        t_local = t_log_bar_locals[tid]
 
         m   = m_pos[idx]
         m_abs    = abs(m)
         neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
 
-        # raw̄ = ā_m / kr
+        # Step 3 adjoint: raw̄ = ā_m / kr
         @inbounds for j in 1:Nr
             raw_bar[j] = a_bar[j, idx] / kr[j]
         end
 
-        # ḡ = adjoint_fftlog(raw̄, conj(U_m)) — uses precomputed plan.kernels_conj
+        # ḡ = adjoint_fftlog(raw̄, conj(U_m))
         _adjoint_fftlog!(g_bar, ws, raw_bar,
                           view(plan.kernels_conj, :, m_abs + 1), neg_sign)
 
-        # ū_m = r · ḡ
+        # Step 2 adjoint (fused): t̄ += conj(i^m) J_m (r ḡ)
+        cim = conj_im[idx]
         @inbounds for j in 1:Nr
-            u_bar_m[j, idx] = plan.r_log[j] * g_bar[j]
+            t_local[j] += cim * plan.Jm[j, idx] * plan.r_log[j] * g_bar[j]
         end
     end
 
     a_bar = nothing; GC.gc()
 
-    # ─── Step 2 adjoint: mode construction ───────────────────
-    # t̄(r_j) = Σ_m (-i)^m J_m(kₓ r_j) ū_m(r_j, m)
-    # Loop idx (columns) in outer loop for contiguous memory access:
-    # Jm[:, idx] and u_bar_m[:, idx] are contiguous column vectors.
-    conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
-    t_log_bar = zeros(ComplexF64, Nr)
-
-    @inbounds for idx in 1:M_max+1
-        cim = conj_im[idx]
-        for j in 1:Nr
-            t_log_bar[j] += cim * plan.Jm[j, idx] * u_bar_m[j, idx]
-        end
+    # Reduce per-thread accumulators
+    t_log_bar = t_log_bar_locals[1]
+    for t in 2:nt
+        t_log_bar .+= t_log_bar_locals[t]
     end
-
-    u_bar_m = nothing; GC.gc()
 
     # ─── Step 1 adjoint: resample (scatter-add) ──────────────
     # t̄_i = Σ_{j: cell_idx[j]==i} t̄_log(r_j)
@@ -1927,25 +1928,75 @@ end
 
 
 # ═══════════════════════════════════════════════════════════════
-# ChainRulesCore integration (optional)
+# Differentiable PSF intensity
 #
-# If ChainRulesCore is available, defines an rrule for execute_psf
-# so that Zygote (and any ChainRules-compatible AD) can differentiate
-# through execute_psf automatically.
+# Thin wrapper that returns just I_raw (a plain Matrix{Float64})
+# instead of the full NamedTuple.  This is the recommended entry
+# point for Zygote differentiation — the rrule for a plain matrix
+# output is robust and version-proof.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    psf_intensity(plan, t_vals) -> Matrix{Float64}
+
+Compute the PSF intensity (unnormalized) on a Cartesian grid.
+Returns just the `I_raw` matrix from `execute_psf`.
+
+This is the recommended entry point for Zygote differentiation:
+the rrule in `cyffp_zygote.jl` is defined for this function and
+returns/receives a plain matrix (no NamedTuple cotangent handling).
+
+# Example
+```julia
+include("cyffp.jl"); using .CyFFP
+using ChainRulesCore, Zygote
+include("cyffp_zygote.jl")
+
+plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+grad = Zygote.gradient(t -> begin
+    I = psf_intensity(plan, t)
+    return -I[cy, cx] / (sum(I) + 1e-10)
+end, t_vals)[1]
+```
+"""
+function psf_intensity(plan::PSFPlan, t_vals::Vector{ComplexF64})
+    result = execute_psf(plan, t_vals)
+    return result.I_raw
+end
+
+# Saved forward state for psf_intensity adjoint (avoids re-running forward)
+const _PSF_INTENSITY_CACHE = Dict{UInt, NamedTuple}()
+
+function _psf_intensity_with_cache(plan::PSFPlan, t_vals::Vector{ComplexF64})
+    result = execute_psf(plan, t_vals)
+    key = objectid(t_vals)
+    _PSF_INTENSITY_CACHE[key] = result
+    return result.I_raw
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# ChainRulesCore/Zygote integration
 #
-# Usage:
-#   using ChainRulesCore   # must be loaded BEFORE include("cyffp.jl")
-#   include("cyffp.jl")
-#   using .CyFFP, Zygote
+# Defined in cyffp_zygote.jl (separate file).
+# Include it after loading CyFFP and ChainRulesCore:
+#
+#   include("cyffp.jl"); using .CyFFP
+#   using ChainRulesCore, Zygote
+#   include("cyffp_zygote.jl")
 #
 #   plan = prepare_psf(...)
 #   grad = Zygote.gradient(t -> begin
-#       r = execute_psf(plan, t)
-#       return -r.I_raw[cy, cx]   # maximize peak intensity
+#       I = psf_intensity(plan, t)    # recommended: returns plain Matrix
+#       return -I[cy, cx]
 #   end, t_vals)
 #
-# If ChainRulesCore is not loaded, psf_adjoint is still available
-# for manual gradient computation.
+# The rrule is defined for psf_intensity (returns Matrix{Float64})
+# rather than execute_psf (returns NamedTuple) to avoid fragile
+# cotangent extraction from structured types.
+#
+# psf_adjoint is still available for manual gradient computation
+# without any AD framework.
 # ═══════════════════════════════════════════════════════════════
 
 # ChainRulesCore/Zygote integration is defined in cyffp_zygote.jl.

@@ -1,7 +1,7 @@
 """
     cyffp_zygote.jl
     ================
-    ChainRulesCore rrule for execute_psf, enabling Zygote differentiation.
+    ChainRulesCore rrule for psf_intensity, enabling Zygote differentiation.
 
     Usage:
         include("cyffp.jl")
@@ -11,52 +11,38 @@
 
         plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
 
-        # Zygote differentiates through execute_psf automatically:
+        # Zygote differentiates through psf_intensity automatically:
         grad = Zygote.gradient(t -> begin
-            r = execute_psf(plan, t)
-            return -r.I_raw[cy, cx]   # maximize peak intensity
-        end, t_vals)[1]
-
-        # Composed losses work too:
-        grad = Zygote.gradient(t -> begin
-            r = execute_psf(plan, t)
-            I = r.I_raw
+            I = psf_intensity(plan, t)
             return -I[cy, cx] / (sum(I) + 1e-10)  # Strehl-like
         end, t_vals)[1]
 
-    The rrule uses psf_adjoint internally (hand-derived reverse-mode,
-    no AD).  The adjoint/forward ratio is ~2.4-4× depending on M_max.
+    The rrule intercepts psf_intensity and uses psf_adjoint internally.
+    Zygote differentiates everything outside (loss composition, indexing).
+
+    psf_intensity returns a plain Matrix{Float64} (not a NamedTuple),
+    so the cotangent is just a matrix — no fragile field extraction.
 """
 
 using ChainRulesCore
 
-function ChainRulesCore.rrule(::typeof(CyFFP.execute_psf),
+function ChainRulesCore.rrule(::typeof(CyFFP.psf_intensity),
                                plan::CyFFP.PSFPlan,
                                t_vals::Vector{ComplexF64})
+    # Forward: run execute_psf (saves u_psf etc. for adjoint)
     result = CyFFP.execute_psf(plan, t_vals)
+    I_raw  = result.I_raw
 
-    function execute_psf_pullback(Δ)
-        dL_dI_raw = zeros(Float64, plan.Nxy, plan.Nxy)
-
-        # Handle cotangent of I_raw (the primary differentiable output)
-        Δ_I_raw = try; Δ.I_raw; catch; nothing; end
-        if Δ_I_raw !== nothing && !isa(Δ_I_raw, ChainRulesCore.AbstractZero)
-            dL_dI_raw .+= real.(Δ_I_raw)
+    function psf_intensity_pullback(Δ_I_raw)
+        # Δ_I_raw is a plain Matrix{Float64} — no NamedTuple extraction needed
+        dL_dI = if Δ_I_raw isa ChainRulesCore.AbstractZero
+            zeros(Float64, plan.Nxy, plan.Nxy)
+        else
+            Float64.(real.(Δ_I_raw))
         end
-
-        # Also support differentiation through result.I (normalized).
-        # I = I_raw / I_peak ⟹ dL/dI_raw ≈ dL/dI / I_peak.
-        # (Ignores the derivative of I_peak at the argmax — acceptable
-        # for smooth losses that don't depend on exact normalization.)
-        Δ_I = try; Δ.I; catch; nothing; end
-        if Δ_I !== nothing && !isa(Δ_I, ChainRulesCore.AbstractZero)
-            I_peak = maximum(result.I_raw)
-            I_peak > 0 && (dL_dI_raw .+= real.(Δ_I) ./ I_peak)
-        end
-
-        dL_dt = CyFFP.psf_adjoint(plan, t_vals, result, dL_dI_raw)
+        dL_dt = CyFFP.psf_adjoint(plan, t_vals, result, dL_dI)
         return NoTangent(), NoTangent(), dL_dt
     end
 
-    return result, execute_psf_pullback
+    return I_raw, psf_intensity_pullback
 end
