@@ -773,6 +773,11 @@ function graf_shift(A_tilde::Matrix{ComplexF64},
     Nl    = 2L_max + 1
     B     = zeros(ComplexF64, Nkr, Nl)
 
+    # Pre-allocate per-thread Bessel buffers (avoids GC pressure)
+    nt_graf = _nworkspaces()
+    jp_graf = [Vector{Float64}(undef, M_max + 21) for _ in 1:nt_graf]
+    jw_graf = [Vector{Float64}(undef, 2M_max + 1) for _ in 1:nt_graf]
+
     # Thread over kr points (each is independent).
     Threads.@threads for ikr in 1:Nkr
         # Skip evanescent: A_tilde = 0 for kr > k (from Step 3)
@@ -785,12 +790,14 @@ function graf_shift(A_tilde::Matrix{ComplexF64},
         # Bessel truncation: J_m(z) ≈ 0 for |m| > z + buffer
         m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
 
-        # Compute J_0..J_{m_cut} via overflow-safe recurrence
-        Jp = _besselj_range(m_cut, kr_x0)
+        # Compute J_0..J_{m_cut} via overflow-safe recurrence (in-place)
+        tid = Threads.threadid()
+        _besselj_range!(jp_graf[tid], m_cut, kr_x0)
+        Jp = view(jp_graf[tid], 1:m_cut+1)
 
         # Build full Bessel weight vector for m = -m_cut:m_cut
         # J_{-m}(x) = (-1)^m J_m(x)
-        Jw = Vector{Float64}(undef, 2m_cut + 1)
+        Jw = jw_graf[tid]
         @inbounds for m in 0:m_cut
             Jw[m + m_cut + 1] = Jp[m + 1]                            # m ≥ 0
             Jw[-m + m_cut + 1] = iseven(m) ? Jp[m + 1] : -Jp[m + 1] # m < 0
@@ -1823,6 +1830,7 @@ function psf_adjoint(plan::PSFPlan,
     pos_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
     neg_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
     jw_bufs  = [Vector{Float64}(undef, 2(M_max + L_max) + 1) for _ in 1:nt_adj]
+    jp_bufs  = [Vector{Float64}(undef, M_max + L_max + 21) for _ in 1:nt_adj]
 
     Threads.@threads for ikr in 1:Nr
         kr_val = kr[ikr]
@@ -1832,12 +1840,15 @@ function psf_adjoint(plan::PSFPlan,
         buf_pos = pos_bufs[tid]
         buf_neg = neg_bufs[tid]
         Jw      = jw_bufs[tid]
+        Jp_buf  = jp_bufs[tid]
 
         kr_x0 = kr_val * plan.x0
         n_cut = min(M_max + L_max, ceil(Int, abs(kr_x0)) + 20)
         pc = prop_conj[ikr]
 
-        Jp = _besselj_range(n_cut, kr_x0)
+        # In-place Bessel computation — avoids 50 KB allocation per kr
+        _besselj_range!(Jp_buf, n_cut, kr_x0)
+        Jp = view(Jp_buf, 1:n_cut+1)
         @inbounds for d in 0:n_cut
             Jw[d + n_cut + 1] = Jp[d + 1]
             Jw[-d + n_cut + 1] = iseven(d) ? Jp[d + 1] : -Jp[d + 1]
