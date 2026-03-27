@@ -1828,9 +1828,12 @@ function psf_adjoint(plan::PSFPlan,
 
         Jp = _besselj_range(n_cut, kr_x0)
 
-        # Helper: J_d(kr x0) from the Bessel array, handling negative d
-        # Inlined for performance
-        @inbounds for ip in 1:M_max+1
+        # Truncate: J_{m-l} = 0 for |m-l| > n_cut, so only modes
+        # with m ≤ n_cut + L_max have nonzero contributions.
+        # This is the same truncation as the forward graf_shift.
+        m_eff = min(M_max, n_cut + L_max)
+
+        @inbounds for ip in 1:m_eff+1
             m = m_pos[ip]
 
             # Compute ā_tilde_m = Σ_l B̄_l J_{m-l}
