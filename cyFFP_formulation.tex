@@ -760,6 +760,22 @@ $O(N_r\log N_r)$ for $T_0$, plus $O(N_{k_r}\cdot N_\varphi\log N_\varphi)$ for
 the per-$k_r$ interpolation and FFTs.  This replaces $O(M_{\max}\cdot N_r\log N_r)$
 FFTLog calls: a factor of $\sim M_{\max}$ improvement.
 
+\paragraph{Practical limitation.}
+The interpolation of $T_0$ at the shifted arguments $c(\varphi)$ uses linear
+interpolation on the log-spaced $k_r$ grid.  For large $M_{\max}$ (equivalently
+large $k_x R$), the arguments $c(\varphi)$ shift far from the evaluation point $k_r$,
+crossing regions where $T_0$ oscillates rapidly.  Linear interpolation misses these
+oscillations, introducing errors that grow with $M_{\max}$.
+
+In practice, the Neumann path achieves ${<}1\%$ PSF accuracy for
+$M_{\max} \lesssim 1600$ (tested at $R \le 500\lambda$, $\alpha \le 30^\circ$).
+At production scale ($M_{\max} \approx 12{,}600$, $R = 2\,\text{mm}$,
+$\alpha = 30^\circ$), the PSF error reaches ${\sim}9\%$ and the method offers
+no speed advantage over the standard per-mode FFTLog path.
+Higher-order interpolation (cubic spline) or adaptive oversampling of $T_0$
+could extend the useful range, but for the target application the standard
+path is recommended.
+
 
 %=======================================================================
 \section{Ideal Oblique Lens and the Airy Disk}

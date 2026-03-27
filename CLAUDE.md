@@ -62,7 +62,9 @@ Single-module design in `cyffp.jl`. The scalar pipeline propagates a single Cart
 
 ### Neumann shift-theorem fast path (`neumann_shift_coeffs`)
 
-For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Replaces `compute_scalar_coeffs` (Step 2) for this field type. Output feeds directly into `propagate_scalar` (Step 3). Validated against standard path (0.48% RMS, 0.88% PSF). Physics tests: coma asymmetry, Strehl < ideal, y-mirror symmetry.
+For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Replaces `compute_scalar_coeffs` (Step 2) for this field type. Output feeds directly into `propagate_scalar` (Step 3).
+
+**Limitation:** Linear interpolation of T₀ degrades at large M_max. Validated to <1% PSF accuracy up to M_max≈1,600 (R≤500λ, α≤30°). At production scale (M_max≈12,600), the PSF error reaches ~9% and there is no speed advantage. **Use the standard path for production.** The Neumann path is useful for smaller problems, coma physics studies, and cross-validation at moderate scales.
 
 ## Key Design Decisions
 
