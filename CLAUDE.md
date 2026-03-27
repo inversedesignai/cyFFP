@@ -26,8 +26,19 @@ julia test_bruteforce_reference.jl # QuadGK cross-check
 # Scaling validation (R=3λ..1000λ, up to 558 modes)
 julia test_scaling.jl
 
+# Neumann path validation
+julia test_neumann.jl
+
+# Maximum-scale tests (up to 1581 modes)
+julia test_maxscale.jl
+
+# Adjoint (gradient) validation
+julia test_adjoint.jl              # FD checks at 4 loss functions
+julia test_adjoint_scaling.jl      # Scaling study M=53..1112
+
 # Production scale (needs ~37 GB for full M_max)
 julia -t auto test_production_aperture.jl
+julia -t auto test_production_psf.jl   # Ideal oblique + Neumann comparison
 ```
 
 Start Julia with `-t N` for N threads. The module uses `Threads.@threads` for shared-memory parallelism (no Distributed).
@@ -89,6 +100,36 @@ result = execute_psf(plan, t_vals)   # ~55s per design
 For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Replaces `compute_scalar_coeffs` (Step 2) for this field type. Output feeds directly into `propagate_scalar` (Step 3).
 
 **Limitation:** Linear interpolation of T₀ degrades at large M_max. Validated to <1% PSF accuracy up to M_max≈1,600 (R≤500λ, α≤30°). At production scale (M_max≈12,600), the PSF error reaches ~9% and there is no speed advantage. **Use the standard path for production.** The Neumann path is useful for smaller problems, coma physics studies, and cross-validation at moderate scales.
+
+### Adjoint / gradient computation (`psf_adjoint`)
+
+Hand-derived reverse-mode differentiation of the full `execute_psf` pipeline. No AD framework needed — the adjoint of each step (Cartesian interp, |u|², angular synthesis, inverse Hankel, Graf shift, propagation, FFTLog, mode construction, resampling) is implemented explicitly using the self-adjoint property of the Hankel transform (adjoint FFTLog uses conjugated kernel).
+
+```julia
+result = execute_psf(plan, t_vals)
+dL_dI = compute_your_loss_gradient(result.I_raw)  # e.g., target - I_raw
+dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)  # ~2.4-4× forward cost
+```
+
+FD-verified to 1e-7 at N_cells up to 1667. Adjoint/forward ratio: ~2.4× at large M, power law M^0.165.
+
+### Zygote integration (`cyffp_zygote.jl`)
+
+ChainRulesCore rrule for `execute_psf`, enabling automatic differentiation through arbitrary loss functions:
+
+```julia
+include("cyffp.jl"); using .CyFFP
+using ChainRulesCore, Zygote
+include("cyffp_zygote.jl")
+
+plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+grad = Zygote.gradient(t -> begin
+    r = execute_psf(plan, t)
+    return -r.I_raw[cy, cx] / (sum(r.I_raw) + 1e-10)
+end, t_vals)[1]
+```
+
+The rrule intercepts `execute_psf` and uses `psf_adjoint` internally. Zygote differentiates everything outside (loss composition, indexing, arithmetic). Must load `ChainRulesCore` before `include("cyffp.jl")`.
 
 ## Key Design Decisions
 
