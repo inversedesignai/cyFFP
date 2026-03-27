@@ -1925,4 +1925,36 @@ function psf_adjoint(plan::PSFPlan,
     return dL_dt
 end
 
+
+# ═══════════════════════════════════════════════════════════════
+# ChainRulesCore integration (optional)
+#
+# If ChainRulesCore is available, defines an rrule for execute_psf
+# so that Zygote (and any ChainRules-compatible AD) can differentiate
+# through execute_psf automatically.
+#
+# Usage:
+#   using ChainRulesCore   # must be loaded BEFORE include("cyffp.jl")
+#   include("cyffp.jl")
+#   using .CyFFP, Zygote
+#
+#   plan = prepare_psf(...)
+#   grad = Zygote.gradient(t -> begin
+#       r = execute_psf(plan, t)
+#       return -r.I_raw[cy, cx]   # maximize peak intensity
+#   end, t_vals)
+#
+# If ChainRulesCore is not loaded, psf_adjoint is still available
+# for manual gradient computation.
+# ═══════════════════════════════════════════════════════════════
+
+# ChainRulesCore/Zygote integration is defined in cyffp_zygote.jl.
+# Include it after loading CyFFP and ChainRulesCore:
+#
+#   include("cyffp.jl"); using .CyFFP
+#   using ChainRulesCore, Zygote
+#   include("cyffp_zygote.jl")
+#
+# Then Zygote.gradient works on any loss involving execute_psf.
+
 end  # module CyFFP
