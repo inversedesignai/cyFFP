@@ -1806,8 +1806,10 @@ function psf_adjoint(plan::PSFPlan,
     # Forward: B_l = Σ_m ã_{m+l} J_m(kr x₀)
     # Adjoint: ā_tilde_n = Σ_l B̄_l J_{n-l}(kr x₀)
     #
-    # Gather pattern: for each n, sum over l with Bessel weight J_{n-l}.
-    # L_max is small (~15), so the inner loop is short and this is efficient.
+    # Gather pattern: for each n, accumulate from l.  The outer loop
+    # over n (2M+1) has skip checks via n_cut truncation.  The inner
+    # loop over l (2L+1) is short.  ~2-3× slower than forward due to
+    # writing to 2M+1 columns vs reading from them.
     a_tilde_bar = zeros(ComplexF64, Nr, 2M_max + 1)
 
     Threads.@threads for ikr in 1:Nr
@@ -1819,7 +1821,11 @@ function psf_adjoint(plan::PSFPlan,
 
         Jp = _besselj_range(n_cut, kr_x0)
 
-        @inbounds for n in -M_max:M_max
+        # Only iterate n values that have nonzero Bessel contributions
+        n_lo = max(-M_max, -L_max - n_cut)
+        n_hi = min( M_max,  L_max + n_cut)
+
+        @inbounds for n in n_lo:n_hi
             acc = zero(ComplexF64)
             for (li, l) in enumerate(-L_max:L_max)
                 d = n - l
@@ -1893,17 +1899,17 @@ function psf_adjoint(plan::PSFPlan,
     a_bar = nothing; GC.gc()
 
     # ─── Step 2 adjoint: mode construction ───────────────────
-    # t̄(r_j) = Σ_m (-i)^m J_m(kₓ r_j) ū_m(r_j)
+    # t̄(r_j) = Σ_m (-i)^m J_m(kₓ r_j) ū_m(r_j, m)
+    # Loop idx (columns) in outer loop for contiguous memory access:
+    # Jm[:, idx] and u_bar_m[:, idx] are contiguous column vectors.
     conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
     t_log_bar = zeros(ComplexF64, Nr)
 
-    @inbounds for j in 1:Nr
-        plan.cell_idx[j] == 0 && continue
-        acc = zero(ComplexF64)
-        for idx in 1:M_max+1
-            acc += conj_im[idx] * plan.Jm[j, idx] * u_bar_m[j, idx]
+    @inbounds for idx in 1:M_max+1
+        cim = conj_im[idx]
+        for j in 1:Nr
+            t_log_bar[j] += cim * plan.Jm[j, idx] * u_bar_m[j, idx]
         end
-        t_log_bar[j] = acc
     end
 
     u_bar_m = nothing; GC.gc()
