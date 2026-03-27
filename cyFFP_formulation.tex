@@ -1623,6 +1623,58 @@ for random complex perturbation~$\delta$, where $\bar t^\dagger\delta = \sum_i \
 Verified to $10^{-10}$ relative error for total intensity, peak pixel,
 random-weighted, and single-cell perturbation losses.
 
+\paragraph{Fused Steps 3+2.}
+In the implementation, the adjoint FFTLog (Step~3) and mode construction
+(Step~2) are fused into a single threaded loop: as each mode's
+$\bar u_m$ is computed in a per-thread buffer, it is immediately accumulated
+into $\bar t$ via $\bar t(r_j) \mathrel{+}= (-i)^m J_m(k_x r_j)\,\bar u_m(r_j)$.
+Per-thread accumulators are reduced after the loop.  This eliminates the
+$\bar u_m[N_r \times (M_{\max}{+}1)]$ array (${\sim}26$\,GB at production scale).
+
+\subsection{Usage: differentiable PSF}
+
+\paragraph{Manual gradient computation.}
+The function \texttt{psf\_adjoint(plan, t\_vals, result, dL\_dI\_raw)} computes
+$\partial\mathcal{L}/\partial t$ given $\partial\mathcal{L}/\partial I_{\mathrm{raw}}$:
+\begin{verbatim}
+  plan   = prepare_psf(pitch, N_cells; ...)   # precompute (once)
+  result = execute_psf(plan, t_vals)           # forward (~55s)
+  dL_dI  = your_loss_gradient(result.I_raw)    # Matrix{Float64}
+  dL_dt  = psf_adjoint(plan, t_vals, result, dL_dI)  # adjoint (~2-4× fwd)
+\end{verbatim}
+
+\paragraph{Zygote automatic differentiation.}
+The function \texttt{psf\_intensity(plan, t\_vals)} returns only the
+unnormalised PSF intensity $I_{\mathrm{raw}}$ as a plain \texttt{Matrix\{Float64\}}.
+A \texttt{ChainRulesCore.rrule} is defined in the separate file
+\texttt{cyffp\_zygote.jl}, which intercepts \texttt{psf\_intensity} and routes
+the adjoint through \texttt{psf\_adjoint}.
+
+\begin{verbatim}
+  include("cyffp.jl");  using .CyFFP
+  using ChainRulesCore, Zygote
+  include("cyffp_zygote.jl")
+
+  plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+  grad = Zygote.gradient(t -> begin
+      I = psf_intensity(plan, t)
+      return -I[cy, cx] / (sum(I) + 1e-10)   # Strehl-like loss
+  end, t_vals)[1]
+\end{verbatim}
+
+\noindent
+The \texttt{rrule} is defined for \texttt{psf\_intensity} (not
+\texttt{execute\_psf}) because the plain matrix return type avoids fragile
+\texttt{NamedTuple} cotangent extraction.  Zygote automatically differentiates
+the loss function composition (indexing, arithmetic, etc.)\ outside the PSF
+computation.
+
+\paragraph{Scaling.}
+The adjoint/forward cost ratio follows ${\sim}0.7\,M_{\max}^{0.17}$, plateauing
+at ${\sim}2.4\times$ for $M_{\max} > 200$.  Extrapolated to production
+($M_{\max} \approx 12\,600$): ${\sim}4\times$, giving a total per-iteration cost
+of ${\sim}280$\,s on 388 threads for a 2\,mm lens at $\alpha=30^\circ$.
+
 
 %=======================================================================
 \section*{References}
