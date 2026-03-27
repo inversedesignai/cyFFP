@@ -25,7 +25,7 @@ using SpecialFunctions: loggamma, besselj
 export angular_decompose, fftlog_hankel,
        compute_scalar_coeffs, neumann_shift_coeffs, propagate_scalar,
        graf_shift, inverse_hankel, angular_synthesis,
-       compute_psf, prepare_psf, execute_psf
+       compute_psf, prepare_psf, execute_psf, psf_adjoint
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -1583,7 +1583,333 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
         M_max       = plan.M_max,
         Nr          = plan.Nr,
         timings     = timings,
+        _u_psf      = u_psf,    # saved for adjoint (psf_adjoint)
+        _I_polar    = I_polar,   # saved for adjoint
+        _rho        = rho,       # saved for adjoint (Cartesian interp)
+        _psi        = psi,       # saved for adjoint
     )
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Adjoint (reverse-mode differentiation) of execute_psf
+#
+# Given ∂L/∂I_raw (gradient of a scalar loss w.r.t. the unnormalized
+# Cartesian PSF intensity), computes ∂L/∂t_vals.
+#
+# See §Adjoint in the formulation document for the derivation.
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    _adjoint_fftlog!(out, ws, cotangent, kernel_conj)
+
+Adjoint of the FFTLog operation.  Given the cotangent of the FFTLog
+output (`raw_bar`), computes the cotangent of the input:
+
+    f̄ = IFFT(conj(U) · FFT(Reverse(raw̄)))
+
+Uses the precomputed conjugate kernel `kernel_conj = conj(U)`.
+Same structure as the forward FFTLog but with conjugated kernel
+and reversed input — confirming the Hankel transform is self-adjoint.
+"""
+function _adjoint_fftlog!(out::AbstractVector{ComplexF64},
+                           ws::_FFTLogWorkspace,
+                           raw_bar::AbstractVector,
+                           kernel_conj::AbstractVector{ComplexF64},
+                           neg_sign::Int)
+    N = ws.N
+
+    # Apply neg_sign (from J_{-n} = (-1)^n J_n handling)
+    # and reverse the input into work buffer
+    if neg_sign == 1
+        @inbounds for i in 1:N
+            ws.buf[i] = ComplexF64(raw_bar[N - i + 1])
+        end
+    else
+        @inbounds for i in 1:N
+            ws.buf[i] = -ComplexF64(raw_bar[N - i + 1])
+        end
+    end
+
+    # FFT
+    ws.pfft! * ws.buf
+
+    # Multiply by conjugated kernel
+    @inbounds for i in 1:N
+        ws.buf[i] *= kernel_conj[i]
+    end
+
+    # IFFT
+    ws.pifft! * ws.buf
+
+    # Copy to output (no reversal — already reversed the input)
+    @inbounds for i in 1:N
+        out[i] = ws.buf[i]
+    end
+
+    return out
+end
+
+
+"""
+    psf_adjoint(plan, t_vals, result, dL_dI_raw) -> dL_dt
+
+Compute the gradient of a scalar loss with respect to the metalens
+transmission coefficients `t_vals`.
+
+# Arguments
+- `plan`       : PSFPlan from `prepare_psf`
+- `t_vals`     : the transmission vector used in the forward pass
+- `result`     : the NamedTuple returned by `execute_psf(plan, t_vals)`
+- `dL_dI_raw`  : `Matrix{Float64}[Nxy, Nxy]` — gradient of the scalar
+                  loss with respect to `result.I_raw` (unnormalized intensity
+                  on the Cartesian grid)
+
+# Returns
+- `dL_dt` : `Vector{ComplexF64}[N_cells]` — gradient w.r.t. `t_vals`
+
+# Example
+```julia
+plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+result = execute_psf(plan, t_vals)
+
+# Loss = -peak intensity (maximize Strehl)
+dL_dI = zeros(size(result.I_raw))
+dL_dI[argmax(result.I_raw)] = -1.0
+
+dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)
+```
+
+# Verification
+Finite-difference check for complex perturbation δ:
+`[L(t+εδ) - L(t-εδ)] / (2ε) ≈ 2 Re(dL_dt' * δ)`
+"""
+function psf_adjoint(plan::PSFPlan,
+                      t_vals::Vector{ComplexF64},
+                      result::NamedTuple,
+                      dL_dI_raw::Matrix{Float64})
+
+    Nr    = plan.Nr
+    M_max = plan.M_max
+    m_pos = plan.m_pos
+    dln   = plan.dln
+    N_psi = plan.N_psi
+    L_max = plan.L_max
+    Nxy   = plan.Nxy
+
+    # Retrieve saved forward quantities
+    u_psf   = result._u_psf
+    I_polar = result._I_polar
+    rho     = result._rho
+    psi     = result._psi
+
+    hw   = plan.psf_half_width_um
+    x_um = collect(range(-hw, hw, length=Nxy))
+    y_um = collect(range(-hw, hw, length=Nxy))
+    dpsi = psi[2] - psi[1]
+
+    # ─── Step 9 adjoint: Cartesian interp (scatter) ───────────
+    I_polar_bar = zeros(Float64, Nr, N_psi)
+
+    @inbounds for ix in 1:Nxy, iy in 1:Nxy
+        dl = dL_dI_raw[iy, ix]
+        abs(dl) < 1e-30 && continue
+
+        xv = x_um[ix]; yv = y_um[iy]
+        rv = sqrt(xv^2 + yv^2)
+        (rv < rho[1] || rv > rho[end]) && continue
+
+        pv = atan(yv, xv)
+        pv < 0 && (pv += 2π)
+
+        lr  = log(rv); lr0 = log(rho[1])
+        idx_r = (lr - lr0) / dln + 1.0
+        j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
+        wr = idx_r - j0
+
+        idx_p = pv / dpsi + 1.0
+        p0    = clamp(floor(Int, idx_p), 1, N_psi)
+        p1    = p0 == N_psi ? 1 : p0 + 1
+        wp    = idx_p - p0
+
+        I_polar_bar[j0,   p0] += (1-wr)*(1-wp) * dl
+        I_polar_bar[j0+1, p0] += wr*(1-wp)     * dl
+        I_polar_bar[j0,   p1] += (1-wr)*wp     * dl
+        I_polar_bar[j0+1, p1] += wr*wp         * dl
+    end
+
+    # ─── Step 8 adjoint: |u|² → ū = Ī · u ───────────────────
+    u_bar = zeros(ComplexF64, Nr, N_psi)
+    @inbounds for ip in 1:N_psi, j in 1:Nr
+        u_bar[j, ip] = I_polar_bar[j, ip] * u_psf[j, ip]
+    end
+
+    # ─── Step 7 adjoint: angular synthesis → b̄ = FFT_ψ(ū) ───
+    b_bar_fft = fft(u_bar, 2)
+
+    # Un-reorder from FFTW convention to l = -L..L
+    b_bar = zeros(ComplexF64, Nr, 2L_max + 1)
+    for (li, l) in enumerate(-L_max:L_max)
+        col = l >= 0 ? l + 1 : N_psi + l + 1
+        b_bar[:, li] .= b_bar_fft[:, col]
+    end
+
+    # ─── Step 6 adjoint: inverse Hankel ───────────────────────
+    # Forward: b = fftlog_l(kr · B) / ρ
+    # Adjoint: raw̄ = b̄/ρ → f̄ = adj_fftlog(raw̄) → B̄ = kr · f̄
+    kr = plan.kr
+    B_bar = zeros(ComplexF64, Nr, 2L_max + 1)
+
+    nt = Threads.maxthreadid()
+    # Precompute conjugated kernels for l = 0..L_max
+    n_idx = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
+    q     = @. (2π / (Nr * dln)) * n_idx
+    kernels_l = _precompute_kernels(q, collect(0:L_max))
+    kernels_l_conj = conj.(kernels_l)
+
+    ws_pool = [_make_workspace(Nr, dln) for _ in 1:nt]
+
+    Threads.@threads for li in 1:2L_max+1
+        tid = Threads.threadid()
+        ws  = ws_pool[tid]
+        l   = li - L_max - 1
+        l_abs    = abs(l)
+        neg_sign = (l < 0 && isodd(l_abs)) ? -1 : 1
+
+        # raw̄ = b̄ / ρ
+        raw_bar = b_bar[:, li] ./ rho
+
+        # f̄ = adjoint_fftlog(raw̄, conj(U_l))
+        f_bar = Vector{ComplexF64}(undef, Nr)
+        _adjoint_fftlog!(f_bar, ws, raw_bar,
+                          view(kernels_l_conj, :, l_abs + 1), neg_sign)
+
+        # B̄ = kr · f̄
+        @inbounds for j in 1:Nr
+            B_bar[j, li] = kr[j] * f_bar[j]
+        end
+    end
+
+    # ─── Step 5 adjoint: Graf shift ──────────────────────────
+    # Forward: B_l = Σ_m ã_{m+l} J_m(kr x₀)
+    # Adjoint: ā_tilde_n = Σ_l B̄_l J_{n-l}(kr x₀)
+    a_tilde_bar = zeros(ComplexF64, Nr, 2M_max + 1)
+
+    Threads.@threads for ikr in 1:Nr
+        kr_val = kr[ikr]
+        kr_val > plan.k && continue
+
+        kr_x0 = kr_val * plan.x0
+        n_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
+
+        Jp = _besselj_range(n_cut, kr_x0)
+
+        # For each n in -M..M, accumulate Σ_l B̄_l J_{n-l}
+        @inbounds for n in -M_max:M_max
+            n_idx_at = n + M_max + 1
+            acc = zero(ComplexF64)
+            for (li, l) in enumerate(-L_max:L_max)
+                d = n - l   # the Bessel argument index
+                abs(d) > n_cut && continue
+                jd = abs(d) <= n_cut ? (iseven(abs(d)) || d >= 0 ? Jp[abs(d)+1] : -Jp[abs(d)+1]) : 0.0
+                # J_{-|d|} = (-1)^|d| J_{|d|}
+                if d < 0
+                    jd = iseven(-d) ? Jp[-d+1] : -Jp[-d+1]
+                else
+                    jd = d <= n_cut ? Jp[d+1] : 0.0
+                end
+                acc += B_bar[ikr, li] * jd
+            end
+            a_tilde_bar[ikr, n_idx_at] = acc
+        end
+    end
+
+    B_bar = nothing; GC.gc()
+
+    # ─── Step 4 adjoint: propagation ─────────────────────────
+    # ā_m = e^{-ikz f} [ā_tilde_m + (-1)^m ā_tilde_{-m}]  for m > 0
+    # ā_0 = e^{-ikz f} ā_tilde_0
+    kz   = @. sqrt(complex(plan.k^2 - kr.^2))
+    prop_conj = @. ifelse(kr < plan.k, exp(-im * real(kz) * plan.f_val), zero(ComplexF64))
+
+    a_bar = zeros(ComplexF64, Nr, M_max + 1)
+    @inbounds for ip in 1:M_max+1
+        m = m_pos[ip]
+        idx_pos = m + M_max + 1
+        if m == 0
+            for j in 1:Nr
+                a_bar[j, ip] = prop_conj[j] * a_tilde_bar[j, idx_pos]
+            end
+        else
+            idx_neg = -m + M_max + 1
+            s = iseven(m) ? 1 : -1
+            for j in 1:Nr
+                a_bar[j, ip] = prop_conj[j] * (a_tilde_bar[j, idx_pos] + s * a_tilde_bar[j, idx_neg])
+            end
+        end
+    end
+
+    a_tilde_bar = nothing; GC.gc()
+
+    # ─── Step 3 adjoint: FFTLog ──────────────────────────────
+    # Forward: a_m = fftlog_m(r · u_m) / kr
+    # Adjoint: raw̄ = ā_m / kr → ḡ = adj_fftlog(raw̄, conj(U_m)) → ū_m = r · ḡ
+    u_bar_m = zeros(ComplexF64, Nr, M_max + 1)
+
+    # Conjugated kernels for modes 0..M_max
+    kernels_m_conj = conj.(plan.kernels)
+
+    Threads.@threads for idx in 1:M_max+1
+        tid = Threads.threadid()
+        ws  = ws_pool[tid]
+        m   = m_pos[idx]
+        m_abs    = abs(m)
+        neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
+
+        # raw̄ = ā_m / kr
+        raw_bar = Vector{ComplexF64}(undef, Nr)
+        @inbounds for j in 1:Nr
+            raw_bar[j] = a_bar[j, idx] / kr[j]
+        end
+
+        # ḡ = adjoint_fftlog(raw̄, conj(U_m))
+        g_bar = Vector{ComplexF64}(undef, Nr)
+        _adjoint_fftlog!(g_bar, ws, raw_bar,
+                          view(kernels_m_conj, :, m_abs + 1), neg_sign)
+
+        # ū_m = r · ḡ
+        @inbounds for j in 1:Nr
+            u_bar_m[j, idx] = plan.r_log[j] * g_bar[j]
+        end
+    end
+
+    a_bar = nothing; GC.gc()
+
+    # ─── Step 2 adjoint: mode construction ───────────────────
+    # t̄(r_j) = Σ_m (-i)^m J_m(kₓ r_j) ū_m(r_j)
+    conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
+    t_log_bar = zeros(ComplexF64, Nr)
+
+    @inbounds for j in 1:Nr
+        plan.cell_idx[j] == 0 && continue
+        acc = zero(ComplexF64)
+        for idx in 1:M_max+1
+            acc += conj_im[idx] * plan.Jm[j, idx] * u_bar_m[j, idx]
+        end
+        t_log_bar[j] = acc
+    end
+
+    u_bar_m = nothing; GC.gc()
+
+    # ─── Step 1 adjoint: resample (scatter-add) ──────────────
+    # t̄_i = Σ_{j: cell_idx[j]==i} t̄_log(r_j)
+    dL_dt = zeros(ComplexF64, plan.N_cells)
+    @inbounds for j in 1:Nr
+        ic = plan.cell_idx[j]
+        ic > 0 && (dL_dt[ic] += t_log_bar[j])
+    end
+
+    return dL_dt
 end
 
 end  # module CyFFP

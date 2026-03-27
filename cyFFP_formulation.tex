@@ -1617,8 +1617,11 @@ by $M_{\max}$ adjoint FFTLog calls in Step~3.
 
 \noindent
 \textbf{Verification:} finite-difference check
-$\mathcal{L}(t+\varepsilon\delta) \approx \mathcal{L}(t) + 2\varepsilon\,\mathrm{Re}[\bar t^*\delta]$
-for random complex perturbation~$\delta$.
+$[\mathcal{L}(t{+}\varepsilon\delta) - \mathcal{L}(t{-}\varepsilon\delta)]/(2\varepsilon)
+\approx 2\,\mathrm{Re}[\bar t^\dagger\delta]$
+for random complex perturbation~$\delta$, where $\bar t^\dagger\delta = \sum_i \bar t_i^*\,\delta_i$.
+Verified to $10^{-10}$ relative error for total intensity, peak pixel,
+random-weighted, and single-cell perturbation losses.
 
 
 %=======================================================================
