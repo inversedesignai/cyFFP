@@ -879,6 +879,97 @@ $\tilde a_{-m} = (-1)^m\,\tilde a_m$ (scalar symmetry).
 
 
 %=======================================================================
+\section{LPA Metalens Driver (\texttt{compute\_psf})}
+\label{sec:compute_psf}
+%=======================================================================
+
+The function \texttt{compute\_psf} provides a user-facing interface for
+computing the PSF of a metalens described by its radial transmission
+$t(r)$ in the local phase approximation (LPA).
+
+\subsection{Input model}
+
+The metalens is divided into $N_{\mathrm{cells}}$ concentric annular unit cells
+of radial width (pitch) $\Lambda$.  Each cell~$i$ has a complex transmission
+coefficient $t_i$, representing the transmitted near field averaged over the
+cell.  The field is assumed piecewise constant:
+\begin{equation}
+  t(r) = t_i \quad\text{for}\quad (i{-}1)\Lambda < r \le i\Lambda,
+  \qquad i = 1,\ldots,N_{\mathrm{cells}}.
+\end{equation}
+The aperture radius is $R = N_{\mathrm{cells}}\,\Lambda$.
+Under oblique illumination at angle~$\alpha$, the LPA near field is
+\begin{equation}
+  u(r,\theta) = t(r)\,e^{ik_x r\cos\theta},
+  \qquad k_x = k\sin\alpha.
+\end{equation}
+
+\subsection{Mode construction via Jacobi--Anger}
+
+The Jacobi--Anger expansion gives the modes analytically:
+\begin{equation}\label{eq:um_jacobi}
+  u_m(r) = i^m\,t(r)\,J_m(k_x r),
+  \qquad m = 0,\ldots,M_{\max}.
+\end{equation}
+This replaces Step~1 (angular FFT) entirely.  Computing all $M_{\max}+1$
+Bessel values at each $r$ is done in a single Miller backward recurrence
+sweep, giving $J_0(k_x r),\ldots,J_{M_{\max}}(k_x r)$ in $O(M_{\max})$
+time per radial point.  The total cost is $O(N_r \cdot M_{\max})$, which
+is negligible compared to Step~2.
+
+\paragraph{Resampling from uniform to log grid.}
+The transmission $t(r)$ is provided on a uniform grid (one value per cell).
+Since $t$ is piecewise constant, resampling to the FFTLog log-spaced grid is
+a simple cell lookup: $t(r_j) = t_{\lceil r_j/\Lambda\rceil}$.  This is exact
+for the LPA model.
+
+\subsection{Pipeline}
+
+After mode construction, the standard pipeline runs:
+\begin{center}
+\begin{tabular}{@{}r p{10cm}@{}}
+\textbf{Step 2} & Scalar FFTLog: $a_m(k_r) = \HT_m[r\,u_m](k_r)$, one call per mode. \\
+\textbf{Step 3} & Propagation: $\tilde a_m = a_m\,e^{ik_z f}$;\;
+                   $\tilde a_{-m} = (-1)^m\tilde a_m$. \\
+\textbf{Step 4} & Graf shift: $B_l = \sum_m \tilde a_{m+l}\,J_m(k_r x_0)$. \\
+\textbf{Step 5} & Inverse Hankel: $b_l(\rho) = \HT_l[k_r B_l](\rho)$. \\
+\textbf{Step 6} & Angular synthesis: $u(\rho,\psi) = \sum_l b_l\,e^{il\psi}$.
+\end{tabular}
+\end{center}
+
+\subsection{Output}
+
+The PSF is interpolated from the native $(\rho,\psi)$ log-polar grid onto
+a uniform Cartesian $(x,y)$ grid centered at the focal spot, using bilinear
+interpolation in $(\ln\rho,\,\psi)$.  The output intensity $|u(x,y)|^2$ is
+returned both normalized (peak = 1) and unnormalized, along with the axes
+in physical units ($\mu$m) and in units of $\lambda$.
+
+\subsection{Timing estimate (2\,mm lens, $\alpha=30^\circ$, 388 threads)}
+
+\begin{center}
+\begin{tabular}{@{}l r l@{}}
+\toprule
+\textbf{Stage} & \textbf{Time} & \textbf{Notes} \\
+\midrule
+Mode construction  & ${\sim}3$\,s  & Jacobi--Anger + Miller recurrence \\
+Step 2 (FFTLog)    & ${\sim}50$\,s & 12\,588 modes $\times$ Nr=131\,072 \\
+Step 3 (propagate) & ${\sim}15$\,s & Memory-bandwidth limited \\
+Step 4 (Graf)      & ${\sim}5$\,s  & Miller + Bessel truncation \\
+Steps 5--6         & ${\sim}1$\,s  & Only $2L_{\max}+1 \approx 31$ calls \\
+\midrule
+\textbf{Total}     & ${\sim}\mathbf{74}$\,s & vs 303\,s with per-$r$ $\theta$-FFT \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The $4\times$ speedup over the per-$r$ $\theta$-FFT approach comes from replacing
+the $O(N_r \cdot N_\theta \log N_\theta)$ angular FFT with the
+$O(N_r \cdot M_{\max})$ Jacobi--Anger recurrence.
+
+
+%=======================================================================
 \section{Comparison with the Brute-Force Cartesian Approach}
 \label{sec:cartesian}
 %=======================================================================

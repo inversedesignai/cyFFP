@@ -624,6 +624,55 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 """
+    _besselj_range!(out, m_max, x) -> out
+
+In-place version of `_besselj_range`: writes J_0(x)..J_{m_max}(x) into
+the pre-allocated vector `out` (length ≥ m_max+1).  Zero-allocation.
+"""
+function _besselj_range!(out::Vector{Float64}, m_max::Int, x::Float64)
+    if m_max < 0; return out; end
+    if abs(x) < 1e-30
+        @inbounds for i in 1:m_max+1; out[i] = 0.0; end
+        out[1] = 1.0
+        return out
+    end
+
+    m_start = max(m_max, ceil(Int, abs(x))) + max(30, ceil(Int, 15 * sqrt(max(1.0, abs(x)))))
+
+    jnp1     = 0.0
+    jn       = 1.0
+    norm_sum = 0.0
+    @inbounds for i in 1:m_max+1; out[i] = 0.0; end
+
+    for m in m_start:-1:0
+        jnm1 = (2m / x) * jn - jnp1
+
+        if m <= m_max
+            @inbounds out[m + 1] = jn
+        end
+
+        if m == 0
+            norm_sum += jn
+        elseif iseven(m)
+            norm_sum += 2 * jn
+        end
+
+        jnp1 = jn
+        jn   = jnm1
+
+        if abs(jn) > 1e200
+            jn       *= 1e-200
+            jnp1     *= 1e-200
+            norm_sum *= 1e-200
+            @inbounds for i in 1:m_max+1; out[i] *= 1e-200; end
+        end
+    end
+
+    @inbounds for i in 1:m_max+1; out[i] /= norm_sum; end
+    return out
+end
+
+"""
     _besselj_range(m_max, x) -> Vector{Float64}
 
 Compute J_0(x), J_1(x), ..., J_{m_max}(x) via Miller backward recurrence
@@ -1059,6 +1108,11 @@ function compute_psf(t_vals::Vector{ComplexF64},
     u_m = zeros(ComplexF64, Nr, M_max + 1)
     im_factors = [Complex(0.0, 1.0)^m for m in m_pos]
 
+    # Pre-allocate one Bessel buffer per thread to avoid
+    # ~100K × 100KB heap allocations in the mode construction loop.
+    nt = Threads.maxthreadid()
+    jm_bufs = [Vector{Float64}(undef, M_max + 1) for _ in 1:nt]
+
     timings["modes"] = @elapsed begin
         Threads.@threads for j in 1:Nr
             rv = r_log[j]
@@ -1066,7 +1120,8 @@ function compute_psf(t_vals::Vector{ComplexF64},
             abs(tv) < 1e-30 && continue
 
             arg = kx * rv
-            Jm = _besselj_range(M_max, arg)
+            tid = Threads.threadid()
+            Jm  = _besselj_range!(jm_bufs[tid], M_max, arg)
 
             @inbounds for idx in 1:M_max+1
                 u_m[j, idx] = im_factors[idx] * tv * Jm[idx]
