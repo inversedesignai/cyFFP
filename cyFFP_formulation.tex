@@ -1378,6 +1378,250 @@ For $x$-polarized illumination ($E_{-m,r} = +E_{m,r}$, $E_{-m,\theta} = -E_{m,\t
 
 
 %=======================================================================
+\section{Adjoint (Reverse-Mode Differentiation) of the PSF Pipeline}
+\label{sec:adjoint}
+%=======================================================================
+
+For gradient-based design optimization, we require $\partial\mathcal{L}/\partial t_i$,
+where $\mathcal{L}(I_{\mathrm{cart}})$ is a real-valued loss function of the PSF
+intensity and $t_i$ are the complex-valued transmission coefficients of the metalens
+unit cells.  We derive the adjoint (pullback) of each pipeline step.
+
+\subsection{Notation and conventions}
+
+For a real-valued loss $\mathcal{L}$ and complex-valued intermediate variable~$z$,
+the \emph{cotangent} (adjoint variable) is
+\begin{equation}
+  \bar z \;\equiv\; \frac{\partial\mathcal{L}}{\partial z^*}
+  \qquad\text{(Wirtinger derivative w.r.t.\ the conjugate)}.
+\end{equation}
+The total differential satisfies
+$d\mathcal{L} = 2\,\mathrm{Re}\bigl[\bar z^*\,dz\bigr]$.
+For a real variable~$x$, $\bar x = \partial\mathcal{L}/\partial x$ as usual.
+
+For a linear map $y = Ax$, the pullback is $\bar x = A^H \bar y$.
+
+The FFTW conventions: $\mathrm{FFT}(x)[k] = \sum_j x_j\,e^{-2\pi i jk/N}$,\;
+$\mathrm{IFFT}(X)[j] = \tfrac{1}{N}\sum_k X_k\,e^{+2\pi ijk/N}$.
+Pullback of $\mathrm{FFT}$: $\bar x = N\cdot\mathrm{IFFT}(\bar y)$.
+Pullback of $\mathrm{IFFT}$: $\bar X = \tfrac{1}{N}\cdot\mathrm{FFT}(\bar x)$.
+
+
+\subsection{Forward pipeline summary}
+
+The forward chain from $t_i$ to $I_{\mathrm{cart}}$ is:
+\begin{equation}\label{eq:forward_chain}
+  t_i \;\xrightarrow{1}\; t(r_j) \;\xrightarrow{2}\; u_m(r_j)
+  \;\xrightarrow{3}\; a_m(k_r) \;\xrightarrow{4}\; \tilde a_m(k_r)
+  \;\xrightarrow{5}\; B_l(k_r) \;\xrightarrow{6}\; b_l(\rho)
+  \;\xrightarrow{7}\; u(\rho,\psi) \;\xrightarrow{8}\; I(\rho,\psi)
+  \;\xrightarrow{9}\; I_{\mathrm{cart}}(x,y).
+\end{equation}
+All steps except~8 (modulus squared) are linear in the upstream variable.
+
+
+\subsection{Step 9 adjoint: Cartesian interpolation (scatter)}
+
+Forward (bilinear interpolation, gather):
+\begin{equation}
+  I_{\mathrm{cart}}[i_y,i_x]
+  = \sum_{\alpha\in\{00,10,01,11\}} w_\alpha\;I_{\mathrm{polar}}[j_\alpha, p_\alpha],
+\end{equation}
+where $w_\alpha$ are the bilinear weights and $(j_\alpha, p_\alpha)$ are the four
+bracketing grid indices in $(\ln\rho,\,\psi)$.
+
+Adjoint (scatter-add): for each $(i_y,i_x)$,
+\begin{equation}\label{eq:adj_interp}
+  \bar I_{\mathrm{polar}}[j_\alpha, p_\alpha]
+  \;\mathrel{+}=\; w_\alpha\;\bar I_{\mathrm{cart}}[i_y, i_x].
+\end{equation}
+
+
+\subsection{Step 8 adjoint: intensity $I = |u|^2$}
+
+This is the only nonlinear step.  The Wirtinger derivative
+$\partial(u\,u^*)/\partial u^* = u$ gives:
+\begin{equation}\label{eq:adj_abs2}
+  \bar u(\rho_j,\psi_s) = \bar I_{\mathrm{polar}}[j,s]\;\cdot\;u(\rho_j,\psi_s).
+\end{equation}
+Note: no factor of~2 (it is already absorbed into the identity
+$d\mathcal{L} = 2\,\mathrm{Re}[\bar u^*\,du]$), and no conjugation of~$u$
+(the Wirtinger derivative of $|u|^2$ w.r.t.\ $u^*$ is $u$, not $u^*$).
+
+\textbf{Requires the saved forward field $u(\rho,\psi)$.}
+This is the only quantity that must be stored from the forward pass
+($N_r \times N_\psi$ complex values, ${\sim}130$\,MB at production scale).
+
+
+\subsection{Step 7 adjoint: angular synthesis}
+
+Forward: $u(\rho_j,\psi_s) = N_\psi\cdot\mathrm{IFFT}_\psi\{b_l(\rho_j)\}[s]$.
+
+Adjoint (pullback of $N_\psi\cdot\mathrm{IFFT}$ is $\mathrm{FFT}$):
+\begin{equation}\label{eq:adj_synth}
+  \bar b_l(\rho_j) = \mathrm{FFT}_\psi\{\bar u(\rho_j,\psi_s)\}[l]
+\end{equation}
+with the appropriate FFTW index reordering for negative~$l$.
+
+
+\subsection{Step 6 adjoint: inverse Hankel transform}
+
+Forward: $b_l(\rho) = \mathrm{FFTLog}_l\bigl(k_r\,B_l(k_r)\bigr)\big/\rho$.
+
+The FFTLog at order~$l$ is the composition:
+\begin{equation}
+  \mathrm{raw} = \mathrm{Reverse}\bigl[\mathrm{IFFT}\bigl(
+    U_l \cdot \mathrm{FFT}(f)\bigr)\bigr],
+  \qquad f = k_r\,B_l.
+\end{equation}
+
+Adjoint of $b = \mathrm{raw}/\rho$: $\;\overline{\mathrm{raw}} = \bar b / \rho$
+\quad(since $\rho$ is real positive).
+
+Adjoint of the FFTLog core (derived by chaining pullbacks of Reverse, IFFT,
+$\mathrm{diag}(U_l)$, FFT):
+\begin{equation}\label{eq:adj_fftlog}
+\boxed{
+  \bar f = \mathrm{IFFT}\Bigl(
+    U_l^* \cdot \mathrm{FFT}\bigl(\mathrm{Reverse}(\overline{\mathrm{raw}})\bigr)
+  \Bigr).
+}
+\end{equation}
+Since $|U_l(q)| = 1$, we have $U_l^* = 1/U_l$: the adjoint FFTLog uses the
+\emph{conjugate kernel}, which is the inverse Hankel transform kernel.
+The structure is identical to the forward FFTLog, confirming that the
+Hankel transform is (formally) self-adjoint.
+
+Adjoint of $f = k_r\,B_l$: $\;\bar B_l = k_r\,\bar f$
+\quad(since $k_r$ is real).
+
+
+\subsection{Step 5 adjoint: Graf shift}
+
+Forward: $B_l(k_r) = \sum_{m} \tilde a_{m+l}(k_r)\,J_m(k_r x_0)$,\;
+$|l| \le L_{\max}$,\; $|m| \le m_{\mathrm{cut}}(k_r)$.
+
+Adjoint (transpose the convolution):
+\begin{equation}\label{eq:adj_graf}
+  \overline{\tilde a}_n(k_r) = \sum_{l=-L_{\max}}^{L_{\max}}
+  \bar B_l(k_r)\;J_{n-l}(k_r x_0),
+  \qquad |n| \le M_{\max}.
+\end{equation}
+The Bessel weights $J_{n-l}(k_r x_0)$ are real, so no conjugation is needed.
+The same Miller recurrence, Bessel truncation, and $J_{-m} = (-1)^m J_m$
+symmetry apply as in the forward.
+
+
+\subsection{Step 4 adjoint: propagation and symmetry reconstruction}
+
+Forward: $\tilde a_m = a_m\,e^{ik_z f}$ for $m \ge 0$;\;
+$\tilde a_{-m} = (-1)^m\,\tilde a_m$ for $m > 0$.
+
+The positive- and negative-$m$ slots of $\tilde a$ both depend on the single
+$a_m$ coefficient.  Adjoint:
+\begin{equation}\label{eq:adj_prop}
+  \bar a_m = \begin{cases}
+    e^{-ik_z f}\;\overline{\tilde a}_0 & m = 0,\\[4pt]
+    e^{-ik_z f}\;\bigl[\overline{\tilde a}_m + (-1)^m\,\overline{\tilde a}_{-m}\bigr]
+    & m = 1,\ldots,M_{\max}.
+  \end{cases}
+\end{equation}
+The $m = 0$ case has no negative counterpart ($\tilde a_0$ occupies a single
+slot in the array; the general formula would double-count it).
+The factor $e^{-ik_z f} = (e^{ik_z f})^*$ is the conjugate of the
+forward propagation phase ($k_z$ is real for propagating modes, and the
+evanescent modes have $\tilde a = 0$).
+
+
+\subsection{Step 3 adjoint: FFTLog (scalar spectral coefficients)}
+
+Forward: $a_m = \mathrm{FFTLog}_m(r\,u_m)\big/k_r$.
+
+Adjoint of $a_m = \mathrm{raw}/k_r$: $\;\overline{\mathrm{raw}} = \bar a_m / k_r$.
+
+Adjoint of the FFTLog (same formula as~\eqref{eq:adj_fftlog} with order~$m$):
+\begin{equation}
+  \bar g = \mathrm{IFFT}\Bigl(U_m^*\cdot\mathrm{FFT}\bigl(
+    \mathrm{Reverse}(\overline{\mathrm{raw}})\bigr)\Bigr).
+\end{equation}
+
+Adjoint of $g = r\,u_m$: $\;\bar u_m = r\,\bar g$\quad(since $r$ is real).
+
+
+\subsection{Step 2 adjoint: mode construction}
+
+Forward: $u_m(r_j) = i^m\;t(r_j)\;J_m(k_x r_j)$.
+
+Since $J_m$ and $t$ are both functions of $r_j$, and $i^m$ is a constant per mode:
+\begin{equation}\label{eq:adj_modes}
+  \bar t(r_j) = \sum_{m=0}^{M_{\max}} (-i)^m\;J_m(k_x r_j)\;\bar u_m(r_j),
+\end{equation}
+using $\overline{(i^m)} = (i^m)^* = (-i)^m$.
+The $J_m(k_x r_j)$ values are the precomputed Bessel matrix from the plan.
+
+
+\subsection{Step 1 adjoint: resampling (scatter-add)}
+
+Forward (gather): $t(r_j) = t_{c(j)}$, where $c(j) = \lceil r_j/\Lambda\rceil$
+is the cell index.
+
+Adjoint (scatter-add):
+\begin{equation}\label{eq:adj_resample}
+  \bar t_i = \sum_{\{j\,:\,c(j)=i\}} \bar t(r_j).
+\end{equation}
+
+
+\subsection{Summary: adjoint pipeline}
+
+\begin{tcolorbox}[title=Adjoint of \texttt{execute\_psf}]
+\textbf{Given:} $\bar I_{\mathrm{cart}} = \partial\mathcal{L}/\partial I_{\mathrm{cart}}$
+and saved forward field $u(\rho,\psi)$.
+
+\medskip
+\textbf{9.}\ Scatter: $\bar I_{\mathrm{polar}}$ from $\bar I_{\mathrm{cart}}$
+\hfill\eqref{eq:adj_interp}
+
+\textbf{8.}\ $\bar u = \bar I_{\mathrm{polar}}\cdot u$
+\hfill\eqref{eq:adj_abs2}
+
+\textbf{7.}\ $\bar b_l = \mathrm{FFT}_\psi(\bar u)[l]$
+\hfill\eqref{eq:adj_synth}
+
+\textbf{6.}\ For each $l$: $\bar B_l = k_r \cdot \mathrm{IFFT}(U_l^*\cdot\mathrm{FFT}(\mathrm{Rev}(\bar b_l/\rho)))$
+\hfill\eqref{eq:adj_fftlog}
+
+\textbf{5.}\ $\overline{\tilde a}_n = \sum_l \bar B_l\,J_{n-l}(k_r x_0)$
+\hfill\eqref{eq:adj_graf}
+
+\textbf{4.}\ $\bar a_m = e^{-ik_z f}[\overline{\tilde a}_m + (-1)^m\overline{\tilde a}_{-m}]$
+\hfill\eqref{eq:adj_prop}
+
+\textbf{3.}\ For each $m$: $\bar u_m = r\cdot\mathrm{IFFT}(U_m^*\cdot\mathrm{FFT}(\mathrm{Rev}(\bar a_m/k_r)))$
+\hfill\eqref{eq:adj_fftlog}
+
+\textbf{2.}\ $\bar t(r_j) = \sum_m (-i)^m\,J_m(k_x r_j)\,\bar u_m(r_j)$
+\hfill\eqref{eq:adj_modes}
+
+\textbf{1.}\ $\bar t_i = \sum_{\{j:c(j)=i\}} \bar t(r_j)$
+\hfill\eqref{eq:adj_resample}
+\end{tcolorbox}
+
+\noindent
+\textbf{Memory:} only $u(\rho,\psi)$ must be saved from the forward pass
+(${\sim}130$\,MB).  The adjoint allocates the same large arrays as the forward
+($\overline{\tilde a}$: ${\sim}53$\,GB peak).
+
+\noindent
+\textbf{Cost:} approximately equal to the forward pass (${\sim}55$\,s), dominated
+by $M_{\max}$ adjoint FFTLog calls in Step~3.
+
+\noindent
+\textbf{Verification:} finite-difference check
+$\mathcal{L}(t+\varepsilon\delta) \approx \mathcal{L}(t) + 2\varepsilon\,\mathrm{Re}[\bar t^*\delta]$
+for random complex perturbation~$\delta$.
+
+
+%=======================================================================
 \section*{References}
 %=======================================================================
 
