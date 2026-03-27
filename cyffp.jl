@@ -1805,8 +1805,9 @@ function psf_adjoint(plan::PSFPlan,
     # ─── Step 5 adjoint: Graf shift ──────────────────────────
     # Forward: B_l = Σ_m ã_{m+l} J_m(kr x₀)
     # Adjoint: ā_tilde_n = Σ_l B̄_l J_{n-l}(kr x₀)
-    # Iterate: for each l, scatter B̄_l into ā_tilde at positions n = l + d
-    # where |d| ≤ n_cut.  Same Bessel weights as forward.
+    #
+    # Gather pattern: for each n, sum over l with Bessel weight J_{n-l}.
+    # L_max is small (~15), so the inner loop is short and this is efficient.
     a_tilde_bar = zeros(ComplexF64, Nr, 2M_max + 1)
 
     Threads.@threads for ikr in 1:Nr
@@ -1814,30 +1815,20 @@ function psf_adjoint(plan::PSFPlan,
         kr_val > plan.k && continue
 
         kr_x0 = kr_val * plan.x0
-        m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
+        n_cut = min(M_max + L_max, ceil(Int, abs(kr_x0)) + 20)
 
-        Jp = _besselj_range(m_cut, kr_x0)
+        Jp = _besselj_range(n_cut, kr_x0)
 
-        # Build Bessel weight vector for d = -m_cut:m_cut
-        # J_{-d}(x) = (-1)^d J_d(x)
-        @inbounds for (li, l) in enumerate(-L_max:L_max)
-            bl_bar = B_bar[ikr, li]
-            abs(bl_bar) < 1e-30 && continue
-
-            # n = l + d where d plays the role of m in the forward
-            # J_d(kr x0) from the Bessel array
-            for d in -m_cut:m_cut
-                n = l + d
-                (-M_max <= n <= M_max) || continue
-
-                jd = if d >= 0
-                    Jp[d + 1]
-                else
-                    iseven(-d) ? Jp[-d + 1] : -Jp[-d + 1]
-                end
-
-                a_tilde_bar[ikr, n + M_max + 1] += bl_bar * jd
+        @inbounds for n in -M_max:M_max
+            acc = zero(ComplexF64)
+            for (li, l) in enumerate(-L_max:L_max)
+                d = n - l
+                abs(d) > n_cut && continue
+                d_abs = abs(d)
+                jd = d >= 0 ? Jp[d_abs + 1] : (iseven(d_abs) ? Jp[d_abs + 1] : -Jp[d_abs + 1])
+                acc += B_bar[ikr, li] * jd
             end
+            a_tilde_bar[ikr, n + M_max + 1] = acc
         end
     end
 
