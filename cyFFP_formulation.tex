@@ -1159,26 +1159,35 @@ The Neumann shift theorem (\S\ref{sec:neumann}) replaces Step~2 entirely.
 \subsection{Comparison summary}
 
 \begin{center}
-\begin{tabular}{@{}lccc@{}}
+\begin{tabular}{@{}lcc@{}}
 \toprule
-& \textbf{Cartesian 2D FFT} & \textbf{CyFFP scalar} & \textbf{CyFFP Neumann} \\
+& \textbf{Cartesian 2D FFT} & \textbf{CyFFP scalar} \\
 \midrule
-Grid points     & $16384^2 \approx 2.7\times 10^8$ & $131072$ (1D) & $131072$ (1D) \\
-Memory          & ${\sim}10$\,GB        & ${\sim}0.5$\,GB   & ${\sim}0.5$\,GB \\
-Time (1 core)   & ${\sim}3$\,s          & ${\sim}7$\,s       & ${\sim}5$\,s \\
-Time (300 thr.) & ${\sim}1$\,s          & ${\sim}50$\,ms     & ${\sim}25$\,ms \\
-Scaling with $R/\lambda$ & $(R/\lambda)^2$ & $R/\lambda$    & $R/\lambda$ \\
-Output          & Full focal plane      & PSF patch only     & PSF patch only \\
+Grid points     & $16384^2 \approx 2.7\times 10^8$ & $131072$ (1D) \\
+Memory          & ${\sim}10$\,GB        & ${\sim}0.5$\,GB \\
+Time (1 core)   & ${\sim}3$\,s          & ${\sim}7$\,s \\
+Time (388 thr.) & ${\sim}1$\,s          & ${\sim}50$\,ms \\
+Scaling with $R/\lambda$ & $(R/\lambda)^2$ & $R/\lambda$ \\
+Output          & Full focal plane      & PSF patch only \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-The cylindrical approach is ${\sim}20$--$40\times$ faster than Cartesian on 300 threads,
+The cylindrical approach is ${\sim}20\times$ faster than Cartesian on many threads,
 uses ${\sim}20\times$ less memory, and scales linearly rather than quadratically
 with the optical size $R/\lambda$.  For lenses beyond ${\sim}5$\,mm at visible
 wavelengths, the Cartesian approach becomes memory-limited on commodity hardware
 while CyFFP remains practical.
+
+\paragraph{Note on the Neumann fast path.}
+The Neumann shift theorem (\S\ref{sec:neumann}) replaces per-mode FFTLog calls
+with a single order-0 call plus per-$k_r$ interpolation.  While theoretically
+faster by a factor of $M_{\max}$, the interpolation overhead limits the practical
+speedup to $3$--$5\times$ at moderate $M_{\max}$ ($\le 1600$).  At production
+scale ($M_{\max} \approx 12\,600$), the Neumann path offers no speed advantage
+over the standard path and has ${\sim}9\%$ PSF accuracy loss from linear
+interpolation.  \textbf{The standard path is recommended for production.}
 
 
 %=======================================================================
@@ -1200,11 +1209,14 @@ Negative-$m$ symmetry
   & Compute only $m \ge 0$; reconstruct $m < 0$ by
     $\tilde a_{-m} = (-1)^m\tilde a_m$ (scalar). \\[6pt]
 Neumann shift (LPA fields)
-  & ${\sim}M_{\max}\times$ on Step~2
+  & $3$--$5\times$ (moderate $M$)
   & For fields of the form $t(r)\,e^{ik_x r\cos\theta}$, replace
-    all $M_{\max}$ per-mode FFTLog calls by a single order-0 call
-    followed by interpolation and FFT at each $k_r$
-    (\S\ref{sec:neumann}). \\[6pt]
+    per-mode FFTLog calls by a single order-0 call + interpolation +
+    batch FFT (\S\ref{sec:neumann}).  \textbf{Note:} the theoretical
+    $M_{\max}\times$ speedup is limited by interpolation cost; validated
+    to $3$--$5\times$ for $M_{\max} \le 1600$ but no advantage at
+    production scale ($M_{\max} \approx 12\,600$).  Use the standard
+    path for production. \\[6pt]
 Bessel truncation in Graf shift
   & ${\sim}4\times$ on Step~4
   & $J_m(k_r x_0)$ decays exponentially for $|m| > k_r x_0$.
