@@ -1705,6 +1705,9 @@ function psf_adjoint(plan::PSFPlan,
     y_um = collect(range(-hw, hw, length=Nxy))
     dpsi = psi[2] - psi[1]
 
+    adj_timings = Dict{String,Float64}()
+    _t0 = time()
+
     # ─── Step 9 adjoint: Cartesian interp (scatter) ───────────
     I_polar_bar = zeros(Float64, Nr, N_psi)
 
@@ -1751,9 +1754,9 @@ function psf_adjoint(plan::PSFPlan,
         b_bar[:, li] .= b_bar_fft[:, col]
     end
 
+    adj_timings["s9_8_7"] = time() - _t0; _t0 = time()
+
     # ─── Step 6 adjoint: inverse Hankel ───────────────────────
-    # Forward: b = fftlog_l(kr · B) / ρ
-    # Adjoint: raw̄ = b̄/ρ → f̄ = adj_fftlog(raw̄) → B̄ = kr · f̄
     kr = plan.kr
     B_bar = zeros(ComplexF64, Nr, 2L_max + 1)
 
@@ -1793,6 +1796,8 @@ function psf_adjoint(plan::PSFPlan,
         end
     end
 
+    adj_timings["s6_invHT"] = time() - _t0; _t0 = time()
+
     # ─── Step 5 adjoint: Graf shift ──────────────────────────
     # Forward: B_l = Σ_m ã_{m+l} J_m(kr x₀)
     # Adjoint: ā_tilde_n = Σ_l B̄_l J_{n-l}(kr x₀)
@@ -1830,6 +1835,7 @@ function psf_adjoint(plan::PSFPlan,
     end
 
     B_bar = nothing; GC.gc()
+    adj_timings["s5_graf"] = time() - _t0; _t0 = time()
 
     # ─── Step 4 adjoint: propagation ─────────────────────────
     # ā_m = e^{-ikz f} [ā_tilde_m + (-1)^m ā_tilde_{-m}]  for m > 0
@@ -1855,6 +1861,7 @@ function psf_adjoint(plan::PSFPlan,
     end
 
     a_tilde_bar = nothing; GC.gc()
+    adj_timings["s4_prop"] = time() - _t0; _t0 = time()
 
     # ─── Steps 3+2 fused adjoint: FFTLog + mode construction ──
     # Forward Step 2: u_m = i^m t J_m → a_m = fftlog(r u_m) / kr
@@ -1908,6 +1915,8 @@ function psf_adjoint(plan::PSFPlan,
         t_log_bar .+= t_log_bar_locals[t]
     end
 
+    adj_timings["s3_2_fused"] = time() - _t0; _t0 = time()
+
     # ─── Step 1 adjoint: resample (scatter-add) ──────────────
     # t̄_i = Σ_{j: cell_idx[j]==i} t̄_log(r_j)
     dL_dt = zeros(ComplexF64, plan.N_cells)
@@ -1915,6 +1924,15 @@ function psf_adjoint(plan::PSFPlan,
         ic = plan.cell_idx[j]
         ic > 0 && (dL_dt[ic] += t_log_bar[j])
     end
+
+    adj_timings["s1_resample"] = time() - _t0
+
+    println("psf_adjoint: $(round(sum(values(adj_timings)), digits=1))s  " *
+            "(s9-7=$(round(adj_timings["s9_8_7"], digits=1))  " *
+            "s6=$(round(adj_timings["s6_invHT"], digits=1))  " *
+            "s5_graf=$(round(adj_timings["s5_graf"], digits=1))  " *
+            "s4=$(round(adj_timings["s4_prop"], digits=1))  " *
+            "s3+2=$(round(adj_timings["s3_2_fused"], digits=1)))")
 
     return dL_dt
 end
