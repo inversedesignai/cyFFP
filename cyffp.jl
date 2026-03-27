@@ -1304,6 +1304,9 @@ struct PSFPlan
     workspaces::Vector{_FFTLogWorkspace}
     g_bufs::Vector{Vector{ComplexF64}}
 
+    # Precomputed: conjugated kernels for adjoint (avoids per-call copy)
+    kernels_conj::Matrix{ComplexF64}
+
     # Output
     psf_half_width_um::Float64
     Nxy::Int
@@ -1417,7 +1420,10 @@ function prepare_psf(pitch_um::Float64, N_cells::Int;
     end
     println("    $(round(t_ws, digits=1))s")
 
-    mem_total = (sizeof(Jm) + sizeof(kernels)) / 1e9
+    # Conjugated kernels for adjoint (avoids per-call copy)
+    kernels_conj = conj.(kernels)
+
+    mem_total = (sizeof(Jm) + sizeof(kernels) + sizeof(kernels_conj)) / 1e9
     println("  Total precomputed: $(round(mem_total, digits=1)) GB")
 
     return PSFPlan(
@@ -1428,6 +1434,7 @@ function prepare_psf(pitch_um::Float64, N_cells::Int;
         cell_idx,
         kernels,
         workspaces, g_bufs,
+        kernels_conj,
         psf_half_width_um, Nxy,
     )
 end
@@ -1761,26 +1768,31 @@ function psf_adjoint(plan::PSFPlan,
     B_bar = zeros(ComplexF64, Nr, 2L_max + 1)
 
     nt = Threads.maxthreadid()
-    # Precompute conjugated kernels for l = 0..L_max
-    n_idx = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
-    q     = @. (2π / (Nr * dln)) * n_idx
-    kernels_l = _precompute_kernels(q, collect(0:L_max))
-    kernels_l_conj = conj.(kernels_l)
+    # Small kernel for l = 0..L_max (recomputed here — tiny, not worth storing in plan)
+    n_idx_q = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
+    q_vec   = @. (2π / (Nr * dln)) * n_idx_q
+    kernels_l_conj = conj.(_precompute_kernels(q_vec, collect(0:L_max)))
 
-    ws_pool = [_make_workspace(Nr, dln) for _ in 1:nt]
+    # Reuse plan's workspaces and pre-allocate per-thread buffers
+    raw_bufs_adj = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    f_bufs_adj   = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
 
     Threads.@threads for li in 1:2L_max+1
         tid = Threads.threadid()
-        ws  = ws_pool[tid]
+        ws  = plan.workspaces[tid]
+        raw_bar = raw_bufs_adj[tid]
+        f_bar   = f_bufs_adj[tid]
+
         l   = li - L_max - 1
         l_abs    = abs(l)
         neg_sign = (l < 0 && isodd(l_abs)) ? -1 : 1
 
         # raw̄ = b̄ / ρ
-        raw_bar = b_bar[:, li] ./ rho
+        @inbounds for j in 1:Nr
+            raw_bar[j] = b_bar[j, li] / rho[j]
+        end
 
         # f̄ = adjoint_fftlog(raw̄, conj(U_l))
-        f_bar = Vector{ComplexF64}(undef, Nr)
         _adjoint_fftlog!(f_bar, ws, raw_bar,
                           view(kernels_l_conj, :, l_abs + 1), neg_sign)
 
@@ -1793,6 +1805,8 @@ function psf_adjoint(plan::PSFPlan,
     # ─── Step 5 adjoint: Graf shift ──────────────────────────
     # Forward: B_l = Σ_m ã_{m+l} J_m(kr x₀)
     # Adjoint: ā_tilde_n = Σ_l B̄_l J_{n-l}(kr x₀)
+    # Iterate: for each l, scatter B̄_l into ā_tilde at positions n = l + d
+    # where |d| ≤ n_cut.  Same Bessel weights as forward.
     a_tilde_bar = zeros(ComplexF64, Nr, 2M_max + 1)
 
     Threads.@threads for ikr in 1:Nr
@@ -1800,27 +1814,30 @@ function psf_adjoint(plan::PSFPlan,
         kr_val > plan.k && continue
 
         kr_x0 = kr_val * plan.x0
-        n_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
+        m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
 
-        Jp = _besselj_range(n_cut, kr_x0)
+        Jp = _besselj_range(m_cut, kr_x0)
 
-        # For each n in -M..M, accumulate Σ_l B̄_l J_{n-l}
-        @inbounds for n in -M_max:M_max
-            n_idx_at = n + M_max + 1
-            acc = zero(ComplexF64)
-            for (li, l) in enumerate(-L_max:L_max)
-                d = n - l   # the Bessel argument index
-                abs(d) > n_cut && continue
-                jd = abs(d) <= n_cut ? (iseven(abs(d)) || d >= 0 ? Jp[abs(d)+1] : -Jp[abs(d)+1]) : 0.0
-                # J_{-|d|} = (-1)^|d| J_{|d|}
-                if d < 0
-                    jd = iseven(-d) ? Jp[-d+1] : -Jp[-d+1]
+        # Build Bessel weight vector for d = -m_cut:m_cut
+        # J_{-d}(x) = (-1)^d J_d(x)
+        @inbounds for (li, l) in enumerate(-L_max:L_max)
+            bl_bar = B_bar[ikr, li]
+            abs(bl_bar) < 1e-30 && continue
+
+            # n = l + d where d plays the role of m in the forward
+            # J_d(kr x0) from the Bessel array
+            for d in -m_cut:m_cut
+                n = l + d
+                (-M_max <= n <= M_max) || continue
+
+                jd = if d >= 0
+                    Jp[d + 1]
                 else
-                    jd = d <= n_cut ? Jp[d+1] : 0.0
+                    iseven(-d) ? Jp[-d + 1] : -Jp[-d + 1]
                 end
-                acc += B_bar[ikr, li] * jd
+
+                a_tilde_bar[ikr, n + M_max + 1] += bl_bar * jd
             end
-            a_tilde_bar[ikr, n_idx_at] = acc
         end
     end
 
@@ -1856,26 +1873,25 @@ function psf_adjoint(plan::PSFPlan,
     # Adjoint: raw̄ = ā_m / kr → ḡ = adj_fftlog(raw̄, conj(U_m)) → ū_m = r · ḡ
     u_bar_m = zeros(ComplexF64, Nr, M_max + 1)
 
-    # Conjugated kernels for modes 0..M_max
-    kernels_m_conj = conj.(plan.kernels)
-
+    # Reuse per-thread buffers from Step 6 (same size)
     Threads.@threads for idx in 1:M_max+1
         tid = Threads.threadid()
-        ws  = ws_pool[tid]
+        ws  = plan.workspaces[tid]
+        raw_bar = raw_bufs_adj[tid]
+        g_bar   = f_bufs_adj[tid]
+
         m   = m_pos[idx]
         m_abs    = abs(m)
         neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
 
         # raw̄ = ā_m / kr
-        raw_bar = Vector{ComplexF64}(undef, Nr)
         @inbounds for j in 1:Nr
             raw_bar[j] = a_bar[j, idx] / kr[j]
         end
 
-        # ḡ = adjoint_fftlog(raw̄, conj(U_m))
-        g_bar = Vector{ComplexF64}(undef, Nr)
+        # ḡ = adjoint_fftlog(raw̄, conj(U_m)) — uses precomputed plan.kernels_conj
         _adjoint_fftlog!(g_bar, ws, raw_bar,
-                          view(kernels_m_conj, :, m_abs + 1), neg_sign)
+                          view(plan.kernels_conj, :, m_abs + 1), neg_sign)
 
         # ū_m = r · ḡ
         @inbounds for j in 1:Nr
