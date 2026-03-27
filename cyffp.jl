@@ -1481,28 +1481,15 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
         end
     end
 
-    # ── Step 2: FFTLog with precomputed kernels + workspaces ──
-    a_m = zeros(ComplexF64, Nr, M_max + 1)
+    # ── Step 2: FFTLog via compute_scalar_coeffs ──
+    # Call the standalone function rather than using plan.workspaces.
+    # This creates fresh FFTW plans and buffers each call, which
+    # ensures correct NUMA affinity on multi-socket machines (plans
+    # are allocated on the same NUMA node as the executing threads).
+    # The ~10s workspace creation overhead is small compared to the
+    # ~50s FFTLog computation.
     timings["step2"] = @elapsed begin
-        Threads.@threads for idx in 1:M_max+1
-            tid = Threads.threadid()
-            ws  = plan.workspaces[tid]
-            g   = plan.g_bufs[tid]
-            m   = m_pos[idx]
-            m_abs    = abs(m)
-            neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
-
-            @inbounds for j in 1:Nr
-                g[j] = plan.r_log[j] * u_m[j, idx]
-            end
-
-            _fftlog_with_kernel!(view(a_m, :, idx), ws, g,
-                                 view(plan.kernels, :, m_abs + 1), neg_sign)
-
-            @inbounds for j in 1:Nr
-                a_m[j, idx] /= plan.kr[j]
-            end
-        end
+        a_m, _ = compute_scalar_coeffs(u_m, m_pos, plan.r_log)
     end
     u_m = nothing; GC.gc()
 
@@ -1776,13 +1763,14 @@ function psf_adjoint(plan::PSFPlan,
     q_vec   = @. (2π / (Nr * dln)) * n_idx_q
     kernels_l = _precompute_kernels(q_vec, collect(0:L_max))
 
-    # Reuse plan's workspaces and pre-allocate per-thread buffers
-    raw_bufs_adj = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
-    f_bufs_adj   = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    # Create fresh workspaces for NUMA affinity (same rationale as execute_psf)
+    adj_workspaces = [_make_workspace(Nr, dln) for _ in 1:nt]
+    raw_bufs_adj   = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    f_bufs_adj     = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
 
     Threads.@threads for li in 1:2L_max+1
         tid = Threads.threadid()
-        ws  = plan.workspaces[tid]
+        ws  = adj_workspaces[tid]
         raw_bar = raw_bufs_adj[tid]
         f_bar   = f_bufs_adj[tid]
 
@@ -1878,15 +1866,18 @@ function psf_adjoint(plan::PSFPlan,
     # u_bar_m[Nr, M+1] (~26 GB at production scale).
     conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
 
-    # Per-thread accumulators for t_log_bar (reduced after loop)
+    # Per-thread accumulators and fresh workspaces for NUMA affinity
     nt = _nworkspaces()
+    adj_workspaces_m = [_make_workspace(Nr, dln) for _ in 1:nt]
+    raw_bufs_m       = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    g_bufs_m         = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
     t_log_bar_locals = [zeros(ComplexF64, Nr) for _ in 1:nt]
 
     Threads.@threads for idx in 1:M_max+1
         tid = Threads.threadid()
-        ws  = plan.workspaces[tid]
-        raw_bar = raw_bufs_adj[tid]
-        g_bar   = f_bufs_adj[tid]
+        ws  = adj_workspaces_m[tid]
+        raw_bar = raw_bufs_m[tid]
+        g_bar   = g_bufs_m[tid]
         t_local = t_log_bar_locals[tid]
 
         m   = m_pos[idx]
