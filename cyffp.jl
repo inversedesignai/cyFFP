@@ -25,7 +25,7 @@ using SpecialFunctions: loggamma, besselj
 export angular_decompose, fftlog_hankel,
        compute_scalar_coeffs, neumann_shift_coeffs, propagate_scalar,
        graf_shift, inverse_hankel, angular_synthesis,
-       compute_psf
+       compute_psf, prepare_psf, execute_psf
 
 # ═══════════════════════════════════════════════════════════════
 # Step 1 — Angular Decomposition
@@ -1236,6 +1236,352 @@ function compute_psf(t_vals::Vector{ComplexF64},
         f_um        = f_val,
         M_max       = M_max,
         Nr          = Nr,
+        timings     = timings,
+    )
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Plan/Execute pattern for repeated PSF evaluations
+#
+# For design optimization, the user varies t_vals while keeping all
+# geometry fixed.  prepare_psf precomputes everything that does NOT
+# depend on t_vals:
+#
+#   - Bessel matrix J_m(kₓr) for Jacobi-Anger [Nr × (M_max+1)]
+#   - FFTLog filter kernels via Γ-recurrence  [Nr × (M_max+1)]
+#   - FFTW in-place plans (MEASURE)
+#   - Per-thread work buffers
+#   - Cell lookup table (uniform → log grid)
+#
+# execute_psf then only does:
+#   - Resample t_vals (cell lookup)
+#   - u_m = i^m t J_m  (element-wise multiply)
+#   - FFTLog (the irreducible ~50s bottleneck)
+#   - Steps 3-6
+#   - Cartesian interpolation
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    PSFPlan
+
+Precomputed data for repeated PSF evaluations.  Created by `prepare_psf`,
+consumed by `execute_psf`.  Holds ~40 GB for a 2mm lens at α=30°.
+"""
+struct PSFPlan
+    # Grid
+    r_log::Vector{Float64}
+    kr::Vector{Float64}
+    dln::Float64
+    Nr::Int
+
+    # Physics
+    k::Float64
+    kx::Float64
+    f_val::Float64
+    x0::Float64
+    M_max::Int
+    L_max::Int
+    N_psi::Int
+    m_pos::Vector{Int}
+    lambda_um::Float64
+    pitch_um::Float64
+    N_cells::Int
+    rho_airy::Float64
+    NA_eff_sag::Float64
+
+    # Precomputed: Jacobi-Anger Bessel matrix [Nr, M_max+1]
+    Jm::Matrix{Float64}
+    im_factors::Vector{ComplexF64}
+
+    # Precomputed: cell lookup (log-grid index → cell index, 0=outside)
+    cell_idx::Vector{Int}
+
+    # Precomputed: FFTLog kernels [Nr, M_max+1]
+    kernels::Matrix{ComplexF64}
+
+    # Precomputed: per-thread workspaces and buffers
+    workspaces::Vector{_FFTLogWorkspace}
+    g_bufs::Vector{Vector{ComplexF64}}
+
+    # Output
+    psf_half_width_um::Float64
+    Nxy::Int
+end
+
+"""
+    prepare_psf(pitch_um, N_cells; kwargs...) -> PSFPlan
+
+Precompute all geometry-dependent data for repeated PSF evaluations.
+Call once, then use `execute_psf(plan, t_vals)` for each design.
+
+# Arguments
+- `pitch_um` : unit cell pitch in μm
+- `N_cells`  : number of unit cells (aperture radius = N_cells × pitch)
+
+# Keyword arguments (same as `compute_psf`)
+- `lambda_um = 0.5`, `alpha_deg = 0.0`, `f_um = NaN`, `NA = NaN`
+- `Nr = 0`, `L_max = 15`, `N_psi = 64`
+- `psf_half_width_um = NaN`, `Nxy = 201`
+
+# Example
+```julia
+plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+result = execute_psf(plan, t_vals)   # ~55s
+result2 = execute_psf(plan, t_vals2) # ~55s, no re-planning
+```
+"""
+function prepare_psf(pitch_um::Float64, N_cells::Int;
+                     lambda_um::Float64   = 0.5,
+                     alpha_deg::Float64   = 0.0,
+                     f_um::Float64        = NaN,
+                     NA::Float64          = NaN,
+                     Nr::Int              = 0,
+                     L_max::Int           = 15,
+                     N_psi::Int           = 64,
+                     psf_half_width_um::Float64 = NaN,
+                     Nxy::Int             = 201)
+
+    R     = N_cells * pitch_um
+    k     = 2π / lambda_um
+    alpha = deg2rad(alpha_deg)
+    kx    = k * sin(alpha)
+
+    if !isnan(f_um) && !isnan(NA); error("Provide f_um OR NA, not both"); end
+    f_val = !isnan(NA) ? R * sqrt(1/NA^2 - 1) : !isnan(f_um) ? f_um : error("Must provide f_um or NA")
+
+    x0    = f_val * tan(alpha)
+    M_max = max(ceil(Int, kx * R) + 20, 5)
+    m_pos = collect(0:M_max)
+
+    NA_eff_sag = R * cos(alpha) / sqrt((R * cos(alpha))^2 + f_val^2)
+    rho_airy   = 0.61 * lambda_um / NA_eff_sag
+    isnan(psf_half_width_um) && (psf_half_width_um = 5.0 * rho_airy)
+
+    # Grid
+    r_min = lambda_um / (20π)
+    r_max = 50 * R
+    if Nr == 0
+        Nr = 1 << ceil(Int, log2(ceil(Int, log(r_max/r_min) / (lambda_um/(2R)))))
+    end
+    r_log = collect(exp.(range(log(r_min), log(r_max), length=Nr)))
+    dln   = log(r_log[2] / r_log[1])
+    kr    = exp.(log(1.0 / r_log[end]) .+ dln .* (0:Nr-1))
+    @assert R * dln < lambda_um / 2 "Grid too coarse"
+
+    println("prepare_psf: R=$(R)μm, α=$(alpha_deg)°, M_max=$M_max, Nr=$Nr")
+
+    # ── Cell lookup table ──
+    cell_idx = zeros(Int, Nr)
+    @inbounds for j in 1:Nr
+        rv = r_log[j]
+        rv > R && continue
+        ic = clamp(ceil(Int, rv / pitch_um), 1, N_cells)
+        cell_idx[j] = ic
+    end
+
+    # ── Bessel matrix J_m(kₓr) ──
+    println("  Precomputing J_m(kₓr) matrix [$(Nr) × $(M_max+1)]...")
+    im_factors = [Complex(0.0, 1.0)^m for m in m_pos]
+    Jm = zeros(Float64, Nr, M_max + 1)
+
+    nt = Threads.maxthreadid()
+    jm_bufs = [Vector{Float64}(undef, M_max + 1) for _ in 1:nt]
+
+    t_jm = @elapsed begin
+        Threads.@threads for j in 1:Nr
+            cell_idx[j] == 0 && continue
+            tid = Threads.threadid()
+            _besselj_range!(jm_bufs[tid], M_max, kx * r_log[j])
+            @inbounds for idx in 1:M_max+1
+                Jm[j, idx] = jm_bufs[tid][idx]
+            end
+        end
+    end
+    println("    $(round(t_jm, digits=1))s, $(round(sizeof(Jm)/1e9, digits=1)) GB")
+
+    # ── FFTLog kernels ──
+    println("  Precomputing FFTLog kernels...")
+    n_idx = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
+    q     = @. (2π / (Nr * dln)) * n_idx
+    t_kern = @elapsed begin
+        kernels = _precompute_kernels(q, m_pos)
+    end
+    println("    $(round(t_kern, digits=1))s, $(round(sizeof(kernels)/1e9, digits=1)) GB")
+
+    # ── FFTW workspaces ──
+    println("  Creating FFTW MEASURE plans ($nt threads)...")
+    t_ws = @elapsed begin
+        workspaces = [_make_workspace(Nr, dln) for _ in 1:nt]
+        g_bufs     = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    end
+    println("    $(round(t_ws, digits=1))s")
+
+    mem_total = (sizeof(Jm) + sizeof(kernels)) / 1e9
+    println("  Total precomputed: $(round(mem_total, digits=1)) GB")
+
+    return PSFPlan(
+        r_log, collect(kr), dln, Nr,
+        k, kx, f_val, x0, M_max, L_max, N_psi, m_pos,
+        lambda_um, pitch_um, N_cells, rho_airy, NA_eff_sag,
+        Jm, im_factors,
+        cell_idx,
+        kernels,
+        workspaces, g_bufs,
+        psf_half_width_um, Nxy,
+    )
+end
+
+
+"""
+    execute_psf(plan, t_vals) -> NamedTuple
+
+Compute the PSF using a precomputed plan.  Only the FFTLog transforms
+(Step 2) and subsequent steps are executed — all geometry-dependent
+data is reused from the plan.
+
+Returns the same NamedTuple as `compute_psf`.
+"""
+function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
+    @assert length(t_vals) == plan.N_cells "Expected $(plan.N_cells) cells, got $(length(t_vals))"
+
+    Nr    = plan.Nr
+    M_max = plan.M_max
+    m_pos = plan.m_pos
+    dln   = plan.dln
+
+    timings = Dict{String,Float64}()
+
+    # ── Resample t_vals to log grid via precomputed cell lookup ──
+    t_log = zeros(ComplexF64, Nr)
+    @inbounds for j in 1:Nr
+        ic = plan.cell_idx[j]
+        ic > 0 && (t_log[j] = t_vals[ic])
+    end
+
+    # ── Mode construction: u_m = i^m t(r) J_m(kₓr) ──
+    # Element-wise multiply using precomputed Jm matrix.
+    u_m = zeros(ComplexF64, Nr, M_max + 1)
+    timings["modes"] = @elapsed begin
+        @inbounds for idx in 1:M_max+1
+            imf = plan.im_factors[idx]
+            for j in 1:Nr
+                u_m[j, idx] = imf * t_log[j] * plan.Jm[j, idx]
+            end
+        end
+    end
+
+    # ── Step 2: FFTLog with precomputed kernels + workspaces ──
+    a_m = zeros(ComplexF64, Nr, M_max + 1)
+    timings["step2"] = @elapsed begin
+        Threads.@threads for idx in 1:M_max+1
+            tid = Threads.threadid()
+            ws  = plan.workspaces[tid]
+            g   = plan.g_bufs[tid]
+            m   = m_pos[idx]
+            m_abs    = abs(m)
+            neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
+
+            @inbounds for j in 1:Nr
+                g[j] = plan.r_log[j] * u_m[j, idx]
+            end
+
+            _fftlog_with_kernel!(view(a_m, :, idx), ws, g,
+                                 view(plan.kernels, :, m_abs + 1), neg_sign)
+
+            @inbounds for j in 1:Nr
+                a_m[j, idx] /= plan.kr[j]
+            end
+        end
+    end
+    u_m = nothing; GC.gc()
+
+    # ── Step 3: propagation + symmetry ──
+    timings["step3"] = @elapsed begin
+        a_tilde, m_full = propagate_scalar(a_m, m_pos, plan.kr, plan.k, plan.f_val)
+    end
+    a_m = nothing; GC.gc()
+
+    # ── Step 4: Graf shift ──
+    timings["step4"] = @elapsed begin
+        B = graf_shift(a_tilde, m_full, plan.kr, plan.x0, plan.L_max; k=plan.k)
+    end
+    a_tilde = nothing; GC.gc()
+
+    # ── Step 5: inverse Hankel ──
+    timings["step5"] = @elapsed begin
+        b, rho = inverse_hankel(B, plan.L_max, plan.kr)
+    end
+
+    # ── Step 6: angular synthesis ──
+    timings["step6"] = @elapsed begin
+        u_psf, psi = angular_synthesis(b, plan.L_max, plan.N_psi)
+    end
+
+    I_polar = abs2.(u_psf)
+
+    # ── Cartesian interpolation ──
+    hw  = plan.psf_half_width_um
+    Nxy = plan.Nxy
+    x_um = collect(range(-hw, hw, length=Nxy))
+    y_um = collect(range(-hw, hw, length=Nxy))
+
+    I_cart = zeros(Float64, Nxy, Nxy)
+    dpsi   = psi[2] - psi[1]
+
+    timings["interp"] = @elapsed begin
+        @inbounds for ix in 1:Nxy, iy in 1:Nxy
+            xv = x_um[ix]; yv = y_um[iy]
+            rv = sqrt(xv^2 + yv^2)
+            (rv < rho[1] || rv > rho[end]) && continue
+
+            pv = atan(yv, xv)
+            pv < 0 && (pv += 2π)
+
+            lr  = log(rv); lr0 = log(rho[1])
+            idx_r = (lr - lr0) / dln + 1.0
+            j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
+            wr = idx_r - j0
+
+            idx_p = pv / dpsi + 1.0
+            p0    = clamp(floor(Int, idx_p), 1, plan.N_psi)
+            p1    = p0 == plan.N_psi ? 1 : p0 + 1
+            wp    = idx_p - p0
+
+            I_cart[iy, ix] = (
+                (1-wr)*(1-wp)*I_polar[j0, p0]  + wr*(1-wp)*I_polar[j0+1, p0] +
+                (1-wr)*wp    *I_polar[j0, p1]   + wr*wp    *I_polar[j0+1, p1]
+            )
+        end
+    end
+
+    I_raw  = copy(I_cart)
+    I_peak = maximum(I_cart)
+    I_peak > 0 && (I_cart ./= I_peak)
+
+    peak_idx = argmax(I_raw)
+    peak_x   = x_um[peak_idx[2]]
+    peak_y   = y_um[peak_idx[1]]
+
+    t_total = sum(values(timings))
+    println("execute_psf: $(round(t_total, digits=1))s  (modes=$(round(timings["modes"], digits=1))  FFTLog=$(round(timings["step2"], digits=1))  prop=$(round(timings["step3"], digits=1))  graf=$(round(timings["step4"], digits=1))  invHT=$(round(timings["step5"], digits=1))  synth=$(round(timings["step6"], digits=1)))")
+
+    return (
+        I          = I_cart,
+        I_raw      = I_raw,
+        x_um       = x_um,
+        y_um       = y_um,
+        x_lambda   = x_um ./ plan.lambda_um,
+        y_lambda   = y_um ./ plan.lambda_um,
+        rho_airy_um = plan.rho_airy,
+        peak_rho_um = sqrt(peak_x^2 + peak_y^2),
+        peak_xy_um  = (peak_x, peak_y),
+        R_um        = plan.N_cells * plan.pitch_um,
+        alpha_deg   = rad2deg(asin(plan.kx / plan.k)),
+        lambda_um   = plan.lambda_um,
+        f_um        = plan.f_val,
+        M_max       = plan.M_max,
+        Nr          = plan.Nr,
         timings     = timings,
     )
 end
