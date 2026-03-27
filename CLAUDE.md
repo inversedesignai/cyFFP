@@ -53,6 +53,7 @@ Optional: `] add Plots` to generate PSF heatmap PNGs.
 - **SpecialFunctions** - `loggamma` and `besselj`
 - **QuadGK** - Numerical integration (tests only)
 - **Plots** (optional) - PSF heatmap generation
+- **ChainRulesCore**, **Zygote** (optional) - Automatic differentiation
 
 Install via Julia package manager: `] add FFTW SpecialFunctions QuadGK`
 
@@ -103,33 +104,45 @@ For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition f
 
 ### Adjoint / gradient computation (`psf_adjoint`)
 
-Hand-derived reverse-mode differentiation of the full `execute_psf` pipeline. No AD framework needed — the adjoint of each step (Cartesian interp, |u|², angular synthesis, inverse Hankel, Graf shift, propagation, FFTLog, mode construction, resampling) is implemented explicitly using the self-adjoint property of the Hankel transform (adjoint FFTLog uses conjugated kernel).
+Hand-derived reverse-mode differentiation of the full `execute_psf` pipeline. No AD framework needed — the adjoint of each step (Cartesian interp, |u|², angular synthesis, inverse Hankel, Graf shift, propagation, FFTLog, mode construction, resampling) is implemented explicitly using the self-adjoint property of the Hankel transform (adjoint FFTLog uses conjugated kernel). Full derivation in `cyFFP_formulation.tex` §Adjoint.
 
+**Manual usage (no Zygote):**
 ```julia
+plan = prepare_psf(pitch_um, N_cells; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
 result = execute_psf(plan, t_vals)
-dL_dI = compute_your_loss_gradient(result.I_raw)  # e.g., target - I_raw
+dL_dI = your_loss_gradient(result.I_raw)  # Matrix{Float64}, same size as I_raw
 dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)  # ~2.4-4× forward cost
 ```
 
-FD-verified to 1e-7 at N_cells up to 1667. Adjoint/forward ratio: ~2.4× at large M, power law M^0.165.
+FD-verified to 1e-7 at N_cells up to 1667. Adjoint/forward ratio: ~2.4× at large M (power law M^0.165, plateaus). Steps 3+2 of the adjoint are fused to avoid a 26 GB intermediate array.
 
-### Zygote integration (`cyffp_zygote.jl`)
+### Differentiable PSF for Zygote (`psf_intensity`, `cyffp_zygote.jl`)
 
-ChainRulesCore rrule for `execute_psf`, enabling automatic differentiation through arbitrary loss functions:
+**`psf_intensity(plan, t_vals) → Matrix{Float64}`**: returns just the unnormalized PSF intensity (I_raw) as a plain matrix. This is the recommended entry point for Zygote differentiation — the rrule receives/returns a plain matrix cotangent, avoiding fragile NamedTuple extraction.
 
+**Setup and usage:**
 ```julia
-include("cyffp.jl"); using .CyFFP
+# 1. Load the module
+include("cyffp.jl")
+using .CyFFP
+
+# 2. Load AD packages
 using ChainRulesCore, Zygote
+
+# 3. Load the rrule (must be after both CyFFP and ChainRulesCore)
 include("cyffp_zygote.jl")
 
+# 4. Create a plan (once)
 plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+
+# 5. Differentiate any loss function involving psf_intensity
 grad = Zygote.gradient(t -> begin
-    r = execute_psf(plan, t)
-    return -r.I_raw[cy, cx] / (sum(r.I_raw) + 1e-10)
+    I = psf_intensity(plan, t)
+    return -I[cy, cx] / (sum(I) + 1e-10)   # Strehl-like loss
 end, t_vals)[1]
 ```
 
-The rrule intercepts `execute_psf` and uses `psf_adjoint` internally. Zygote differentiates everything outside (loss composition, indexing, arithmetic). Must load `ChainRulesCore` before `include("cyffp.jl")`.
+The rrule intercepts `psf_intensity` and uses `psf_adjoint` internally. Zygote automatically differentiates everything outside (loss composition, indexing, arithmetic). The load order of `cyffp.jl` does not matter — only `cyffp_zygote.jl` must be included after both `CyFFP` and `ChainRulesCore` are available.
 
 ## Key Design Decisions
 
@@ -143,7 +156,7 @@ The rrule intercepts `execute_psf` and uses `psf_adjoint` internally. Zygote dif
 
 ## Formulation
 
-- `cyFFP_formulation.tex` — Self-contained formulation document: scalar proof, FFTLog, Graf derivation, Neumann shift theorem, cost analysis. TE/TM retained in Appendix A for reference.
+- `cyFFP_formulation.tex` — Self-contained formulation document: scalar proof, FFTLog, Graf derivation, Neumann shift theorem, cost analysis, adjoint derivation. TE/TM retained in Appendix A for reference.
 - `cyFFP0.pdf`, `cyFFP1.pdf`, `cyFFP2.pdf` — Historical derivation PDFs (superseded by tex document).
 
 ## Deleted Files (for historical reference)
