@@ -1798,15 +1798,25 @@ function psf_adjoint(plan::PSFPlan,
 
     adj_timings["s6_invHT"] = time() - _t0; _t0 = time()
 
-    # ─── Step 5 adjoint: Graf shift ──────────────────────────
-    # Forward: B_l = Σ_m ã_{m+l} J_m(kr x₀)
-    # Adjoint: ā_tilde_n = Σ_l B̄_l J_{n-l}(kr x₀)
+    # ─── Steps 5+4 fused adjoint: Graf shift + propagation ───
+    # Forward Step 4: B_l = Σ_m ã_{m+l} J_m(kr x₀)
+    # Forward Step 3: ã_m = a_m e^{ikz f}, ã_{-m} = (-1)^m ã_m
     #
-    # Gather pattern: for each n, accumulate from l.  The outer loop
-    # over n (2M+1) has skip checks via n_cut truncation.  The inner
-    # loop over l (2L+1) is short.  ~2-3× slower than forward due to
-    # writing to 2M+1 columns vs reading from them.
-    a_tilde_bar = zeros(ComplexF64, Nr, 2M_max + 1)
+    # Adjoint (fused): compute a_bar directly from B_bar without
+    # materializing a_tilde_bar [Nr, 2M+1] (53 GB at production).
+    #
+    # For m ≥ 0:
+    #   ā_tilde_m     = Σ_l B̄_l J_{m-l}(kr x₀)
+    #   ā_tilde_{-m}  = Σ_l B̄_l J_{-m-l}(kr x₀)
+    #   ā_m = e^{-ikz f} [ā_tilde_m + (-1)^m ā_tilde_{-m}]
+    #
+    # The 53 GB intermediate is eliminated.  Each thread computes
+    # one row of a_bar using a local buffer (M+1 values, ~200 KB,
+    # fits in L2 cache).
+    kz       = @. sqrt(complex(plan.k^2 - kr.^2))
+    prop_conj = @. ifelse(kr < plan.k, exp(-im * real(kz) * plan.f_val), zero(ComplexF64))
+
+    a_bar = zeros(ComplexF64, Nr, M_max + 1)
 
     Threads.@threads for ikr in 1:Nr
         kr_val = kr[ikr]
@@ -1814,54 +1824,46 @@ function psf_adjoint(plan::PSFPlan,
 
         kr_x0 = kr_val * plan.x0
         n_cut = min(M_max + L_max, ceil(Int, abs(kr_x0)) + 20)
+        pc = prop_conj[ikr]
 
         Jp = _besselj_range(n_cut, kr_x0)
 
-        # Only iterate n values that have nonzero Bessel contributions
-        n_lo = max(-M_max, -L_max - n_cut)
-        n_hi = min( M_max,  L_max + n_cut)
+        # Helper: J_d(kr x0) from the Bessel array, handling negative d
+        # Inlined for performance
+        @inbounds for ip in 1:M_max+1
+            m = m_pos[ip]
 
-        @inbounds for n in n_lo:n_hi
-            acc = zero(ComplexF64)
+            # Compute ā_tilde_m = Σ_l B̄_l J_{m-l}
+            at_pos = zero(ComplexF64)
             for (li, l) in enumerate(-L_max:L_max)
-                d = n - l
+                d = m - l
                 abs(d) > n_cut && continue
                 d_abs = abs(d)
                 jd = d >= 0 ? Jp[d_abs + 1] : (iseven(d_abs) ? Jp[d_abs + 1] : -Jp[d_abs + 1])
-                acc += B_bar[ikr, li] * jd
+                at_pos += B_bar[ikr, li] * jd
             end
-            a_tilde_bar[ikr, n + M_max + 1] = acc
+
+            if m == 0
+                a_bar[ikr, ip] = pc * at_pos
+            else
+                # Compute ā_tilde_{-m} = Σ_l B̄_l J_{-m-l}
+                at_neg = zero(ComplexF64)
+                for (li, l) in enumerate(-L_max:L_max)
+                    d = -m - l
+                    abs(d) > n_cut && continue
+                    d_abs = abs(d)
+                    jd = d >= 0 ? Jp[d_abs + 1] : (iseven(d_abs) ? Jp[d_abs + 1] : -Jp[d_abs + 1])
+                    at_neg += B_bar[ikr, li] * jd
+                end
+
+                s = iseven(m) ? 1 : -1
+                a_bar[ikr, ip] = pc * (at_pos + s * at_neg)
+            end
         end
     end
 
     B_bar = nothing; GC.gc()
-    adj_timings["s5_graf"] = time() - _t0; _t0 = time()
-
-    # ─── Step 4 adjoint: propagation ─────────────────────────
-    # ā_m = e^{-ikz f} [ā_tilde_m + (-1)^m ā_tilde_{-m}]  for m > 0
-    # ā_0 = e^{-ikz f} ā_tilde_0
-    kz   = @. sqrt(complex(plan.k^2 - kr.^2))
-    prop_conj = @. ifelse(kr < plan.k, exp(-im * real(kz) * plan.f_val), zero(ComplexF64))
-
-    a_bar = zeros(ComplexF64, Nr, M_max + 1)
-    @inbounds for ip in 1:M_max+1
-        m = m_pos[ip]
-        idx_pos = m + M_max + 1
-        if m == 0
-            for j in 1:Nr
-                a_bar[j, ip] = prop_conj[j] * a_tilde_bar[j, idx_pos]
-            end
-        else
-            idx_neg = -m + M_max + 1
-            s = iseven(m) ? 1 : -1
-            for j in 1:Nr
-                a_bar[j, ip] = prop_conj[j] * (a_tilde_bar[j, idx_pos] + s * a_tilde_bar[j, idx_neg])
-            end
-        end
-    end
-
-    a_tilde_bar = nothing; GC.gc()
-    adj_timings["s4_prop"] = time() - _t0; _t0 = time()
+    adj_timings["s5_4_graf_prop"] = time() - _t0; _t0 = time()
 
     # ─── Steps 3+2 fused adjoint: FFTLog + mode construction ──
     # Forward Step 2: u_m = i^m t J_m → a_m = fftlog(r u_m) / kr
@@ -1930,8 +1932,7 @@ function psf_adjoint(plan::PSFPlan,
     println("psf_adjoint: $(round(sum(values(adj_timings)), digits=1))s  " *
             "(s9-7=$(round(adj_timings["s9_8_7"], digits=1))  " *
             "s6=$(round(adj_timings["s6_invHT"], digits=1))  " *
-            "s5_graf=$(round(adj_timings["s5_graf"], digits=1))  " *
-            "s4=$(round(adj_timings["s4_prop"], digits=1))  " *
+            "s5+4=$(round(adj_timings["s5_4_graf_prop"], digits=1))  " *
             "s3+2=$(round(adj_timings["s3_2_fused"], digits=1)))")
 
     return dL_dt
