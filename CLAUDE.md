@@ -60,6 +60,30 @@ Single-module design in `cyffp.jl`. The scalar pipeline propagates a single Cart
 5. **Inverse Hankel** (`inverse_hankel`) — FFTLog in local basis; only 2L_max+1 calls (~27); output ρ-grid = reciprocal of kr-grid = original r-grid; threaded over modes
 6. **Angular synthesis** (`angular_synthesis`) — IFFT over local modes; u(ρ,ψ) = Σ_l b_l(ρ) e^{ilψ}; take |u|² for PSF intensity
 
+### User-facing LPA driver (`compute_psf`, `prepare_psf`, `execute_psf`)
+
+For metalens PSF computation from a radial transmission profile t(r):
+
+**Single evaluation:**
+```julia
+result = compute_psf(t_vals, pitch_um; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+# result.I is the normalized 2D PSF on a uniform Cartesian grid
+# result.x_um, result.y_um are the axes in μm
+```
+
+- `t_vals`: complex transmission per unit cell (length N_cells)
+- `pitch_um`: unit cell pitch in μm
+- Modes computed via Jacobi-Anger (i^m t(r) J_m(kₓr)), bypasses Step 1 entirely
+- Output: 2D PSF on uniform (x,y) grid centered at focal spot
+
+**Optimization loop** (precompute geometry once, reuse):
+```julia
+plan = prepare_psf(pitch_um, N_cells; lambda_um=0.5, alpha_deg=30.0, NA=0.4)  # ~15s
+result = execute_psf(plan, t_vals)   # ~55s per design
+```
+
+`prepare_psf` precomputes: Bessel matrix J_m(kₓr), FFTLog kernels, FFTW plans, cell lookup table. Saves ~15s per iteration vs `compute_psf`.
+
 ### Neumann shift-theorem fast path (`neumann_shift_coeffs`)
 
 For LPA fields of the form t(r)·exp(ikₓ r cosθ), uses the Neumann addition formula to obtain ALL M_max modal coefficients from a **single** order-0 FFTLog call + interpolation + FFT per kr. Replaces `compute_scalar_coeffs` (Step 2) for this field type. Output feeds directly into `propagate_scalar` (Step 3).

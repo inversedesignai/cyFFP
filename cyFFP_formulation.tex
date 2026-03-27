@@ -968,6 +968,33 @@ The $4\times$ speedup over the per-$r$ $\theta$-FFT approach comes from replacin
 the $O(N_r \cdot N_\theta \log N_\theta)$ angular FFT with the
 $O(N_r \cdot M_{\max})$ Jacobi--Anger recurrence.
 
+\subsection{Plan/execute pattern for optimization loops}
+
+For inverse design, the PSF is evaluated many times with different
+$t(r)$ but fixed geometry ($R$, $\lambda$, $\alpha$, $f$).  The function
+\texttt{prepare\_psf} precomputes all geometry-dependent data:
+
+\begin{itemize}[nosep]
+  \item $J_m(k_x r_j)$ for all $(m,j)$: the Jacobi--Anger Bessel matrix
+        ($N_r \times M_{\max}$ reals, ${\sim}13$\,GB for 2\,mm lens).
+        Uses Miller backward recurrence, threaded over~$r$.
+  \item FFTLog filter kernels $U_m(q)$ for all~$m$: precomputed via the
+        $\Gamma$-recurrence ($N_r \times M_{\max}$ complex, ${\sim}26$\,GB).
+  \item FFTW in-place plans (one per thread, created with \texttt{MEASURE}).
+  \item Cell lookup table: maps each log-grid index to its unit cell.
+\end{itemize}
+The total precomputation cost is ${\sim}15$\,s and ${\sim}40$\,GB for the
+2\,mm production case.  The function \texttt{execute\_psf} then takes a new
+$t(r)$ vector and runs only:
+\begin{enumerate}[nosep]
+  \item Resample $t$ via cell lookup (trivial).
+  \item $u_m = i^m\,t \cdot J_m$ (element-wise multiply with precomputed matrix).
+  \item FFTLog with precomputed kernels and plans (${\sim}50$\,s, irreducible).
+  \item Steps 3--6 (${\sim}20$\,s).
+\end{enumerate}
+Per-iteration cost: ${\sim}55$\,s (vs ${\sim}74$\,s for \texttt{compute\_psf}).
+Over 100 design iterations, the precomputation saves ${\sim}30$ minutes.
+
 
 %=======================================================================
 \section{Comparison with the Brute-Force Cartesian Approach}
