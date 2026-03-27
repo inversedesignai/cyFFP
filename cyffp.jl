@@ -110,6 +110,14 @@ end
 # Stable for any real ν, including |ν| ~ 600+.
 # ═══════════════════════════════════════════════════════════════
 
+# ─── Thread count helper ─────────────────────────────────────
+# Julia 1.12 separates interactive (thread 1) from compute threads,
+# so maxthreadid() can be 2× nthreads() on some machines.  Using
+# maxthreadid() for workspace allocation wastes memory and can cause
+# FFTW plan contention.  Use nthreads() + 1 to cover the interactive
+# thread without over-allocating.
+_nworkspaces() = Threads.nthreads() + 1
+
 # ─── Pre-allocated FFTLog workspace (for zero-allocation hot loops) ───
 #
 # Holds per-thread buffers and in-place FFTW plans.  Created once per
@@ -384,7 +392,7 @@ function compute_scalar_coeffs(u_m::Matrix{ComplexF64},
     kernels = _precompute_kernels(q, collect(0:m_abs_max))
 
     # Pre-allocate one workspace per thread (in-place FFTW MEASURE plans).
-    nt = Threads.maxthreadid()
+    nt = _nworkspaces()
     workspaces = [_make_workspace(Nr, dln) for _ in 1:nt]
     g_bufs     = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
 
@@ -860,7 +868,7 @@ function inverse_hankel(B::Matrix{ComplexF64},
     kernels = _precompute_kernels(q, collect(0:L_max))
 
     # Pre-allocate one workspace per thread.
-    nt = Threads.maxthreadid()
+    nt = _nworkspaces()
     workspaces = [_make_workspace(Nkr, dln) for _ in 1:nt]
     f_bufs     = [Vector{ComplexF64}(undef, Nkr) for _ in 1:nt]
 
@@ -1111,7 +1119,7 @@ function compute_psf(t_vals::Vector{ComplexF64},
 
     # Pre-allocate one Bessel buffer per thread to avoid
     # ~100K × 100KB heap allocations in the mode construction loop.
-    nt = Threads.maxthreadid()
+    nt = _nworkspaces()
     jm_bufs = [Vector{Float64}(undef, M_max + 1) for _ in 1:nt]
 
     timings["modes"] = @elapsed begin
@@ -1305,9 +1313,6 @@ struct PSFPlan
     workspaces::Vector{_FFTLogWorkspace}
     g_bufs::Vector{Vector{ComplexF64}}
 
-    # Precomputed: conjugated kernels for adjoint (avoids per-call copy)
-    kernels_conj::Matrix{ComplexF64}
-
     # Output
     psf_half_width_um::Float64
     Nxy::Int
@@ -1389,7 +1394,7 @@ function prepare_psf(pitch_um::Float64, N_cells::Int;
     im_factors = [Complex(0.0, 1.0)^m for m in m_pos]
     Jm = zeros(Float64, Nr, M_max + 1)
 
-    nt = Threads.maxthreadid()
+    nt = _nworkspaces()
     jm_bufs = [Vector{Float64}(undef, M_max + 1) for _ in 1:nt]
 
     t_jm = @elapsed begin
@@ -1421,10 +1426,7 @@ function prepare_psf(pitch_um::Float64, N_cells::Int;
     end
     println("    $(round(t_ws, digits=1))s")
 
-    # Conjugated kernels for adjoint (avoids per-call copy)
-    kernels_conj = conj.(kernels)
-
-    mem_total = (sizeof(Jm) + sizeof(kernels) + sizeof(kernels_conj)) / 1e9
+    mem_total = (sizeof(Jm) + sizeof(kernels)) / 1e9
     println("  Total precomputed: $(round(mem_total, digits=1)) GB")
 
     return PSFPlan(
@@ -1435,7 +1437,6 @@ function prepare_psf(pitch_um::Float64, N_cells::Int;
         cell_idx,
         kernels,
         workspaces, g_bufs,
-        kernels_conj,
         psf_half_width_um, Nxy,
     )
 end
@@ -1469,11 +1470,12 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
 
     # ── Mode construction: u_m = i^m t(r) J_m(kₓr) ──
     # Element-wise multiply using precomputed Jm matrix.
+    # Threaded over modes (each column is independent).
     u_m = zeros(ComplexF64, Nr, M_max + 1)
     timings["modes"] = @elapsed begin
-        @inbounds for idx in 1:M_max+1
+        Threads.@threads for idx in 1:M_max+1
             imf = plan.im_factors[idx]
-            for j in 1:Nr
+            @inbounds for j in 1:Nr
                 u_m[j, idx] = imf * t_log[j] * plan.Jm[j, idx]
             end
         end
@@ -1623,7 +1625,7 @@ and reversed input — confirming the Hankel transform is self-adjoint.
 function _adjoint_fftlog!(out::AbstractVector{ComplexF64},
                            ws::_FFTLogWorkspace,
                            raw_bar::AbstractVector,
-                           kernel_conj::AbstractVector{ComplexF64},
+                           kernel::AbstractVector{ComplexF64},
                            neg_sign::Int)
     N = ws.N
 
@@ -1642,9 +1644,9 @@ function _adjoint_fftlog!(out::AbstractVector{ComplexF64},
     # FFT
     ws.pfft! * ws.buf
 
-    # Multiply by conjugated kernel
+    # Multiply by conjugated kernel (conjugate on the fly, no stored copy)
     @inbounds for i in 1:N
-        ws.buf[i] *= kernel_conj[i]
+        ws.buf[i] *= conj(kernel[i])
     end
 
     # IFFT
@@ -1768,11 +1770,11 @@ function psf_adjoint(plan::PSFPlan,
     kr = plan.kr
     B_bar = zeros(ComplexF64, Nr, 2L_max + 1)
 
-    nt = Threads.maxthreadid()
+    nt = _nworkspaces()
     # Small kernel for l = 0..L_max (recomputed here — tiny, not worth storing in plan)
     n_idx_q = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
     q_vec   = @. (2π / (Nr * dln)) * n_idx_q
-    kernels_l_conj = conj.(_precompute_kernels(q_vec, collect(0:L_max)))
+    kernels_l = _precompute_kernels(q_vec, collect(0:L_max))
 
     # Reuse plan's workspaces and pre-allocate per-thread buffers
     raw_bufs_adj = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
@@ -1793,9 +1795,9 @@ function psf_adjoint(plan::PSFPlan,
             raw_bar[j] = b_bar[j, li] / rho[j]
         end
 
-        # f̄ = adjoint_fftlog(raw̄, conj(U_l))
+        # f̄ = adjoint_fftlog(raw̄, conj(U_l)) — conjugates kernel on the fly
         _adjoint_fftlog!(f_bar, ws, raw_bar,
-                          view(kernels_l_conj, :, l_abs + 1), neg_sign)
+                          view(kernels_l, :, l_abs + 1), neg_sign)
 
         # B̄ = kr · f̄
         @inbounds for j in 1:Nr
@@ -1877,7 +1879,7 @@ function psf_adjoint(plan::PSFPlan,
     conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
 
     # Per-thread accumulators for t_log_bar (reduced after loop)
-    nt = Threads.maxthreadid()
+    nt = _nworkspaces()
     t_log_bar_locals = [zeros(ComplexF64, Nr) for _ in 1:nt]
 
     Threads.@threads for idx in 1:M_max+1
@@ -1896,9 +1898,9 @@ function psf_adjoint(plan::PSFPlan,
             raw_bar[j] = a_bar[j, idx] / kr[j]
         end
 
-        # ḡ = adjoint_fftlog(raw̄, conj(U_m))
+        # ḡ = adjoint_fftlog(raw̄, conj(U_m)) — conjugates kernel on the fly
         _adjoint_fftlog!(g_bar, ws, raw_bar,
-                          view(plan.kernels_conj, :, m_abs + 1), neg_sign)
+                          view(plan.kernels, :, m_abs + 1), neg_sign)
 
         # Step 2 adjoint (fused): t̄ += conj(i^m) J_m (r ḡ)
         cim = conj_im[idx]
