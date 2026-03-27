@@ -114,7 +114,20 @@ dL_dI = your_loss_gradient(result.I_raw)  # Matrix{Float64}, same size as I_raw
 dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)  # ~2.4-4× forward cost
 ```
 
-FD-verified to 1e-7 at N_cells up to 1667. Adjoint/forward ratio: ~2.4× at large M (power law M^0.165, plateaus). Steps 3+2 of the adjoint are fused to avoid a 26 GB intermediate array.
+FD-verified to 1e-7 at N_cells up to 1667. Steps 5+4 (Graf+propagation) and Steps 3+2 (FFTLog+modes) of the adjoint are each fused to avoid large intermediate arrays (53 GB and 26 GB respectively eliminated).
+
+**Known performance issue — adjoint Graf shift bottleneck:**
+
+On a 2-socket 350-thread production machine (R=1000μm, α=30°, M=6303, Nr=65536):
+- Forward: **33s** (modes 15s + FFTLog 11s + prop 4s + graf 0.8s)
+- Adjoint: **~250s** (s5+4 ~226s + s3+2 ~22s)
+- The fused s5+4 (Graf+prop adjoint) takes **226s** while the forward graf takes **0.8s** — a 280× gap
+
+The adjoint s5+4 does ~2× the FLOPs of the forward (pos+neg Bessel sums), but the theoretical compute time is ~10ms on 350 threads. The 226s actual time (20,000× overhead) is unexplained. GC was ruled out (pre-allocated buffers). The bottleneck appears hardware-specific to the multi-socket NUMA machine.
+
+**Diagnosis needed:** Run `julia -t 350 profile_adjoint_graf.jl` and `julia -t 1 profile_adjoint_graf.jl`. The script isolates each component (Bessel, scatter loop, zeroing, write-back) and compares single-thread vs multi-thread to identify whether the issue is NUMA, cache coherence, thread scheduling, or @simd not vectorizing. The "Estimated vs actual" comparison at the end quantifies the overhead factor.
+
+On a single-thread local machine, the adjoint/forward ratio is ~2.5× (expected). The production-machine ratio of ~8× suggests a threading/memory issue specific to the 2-socket topology.
 
 ### Differentiable PSF for Zygote (`psf_intensity`, `cyffp_zygote.jl`)
 
