@@ -1685,10 +1685,10 @@ computation.
 After fixing a Julia closure-boxing issue (v1.3), the adjoint is
 significantly faster than the forward: at production scale
 ($M_{\max} \approx 12\,600$, 350 threads), the forward takes
-${\sim}120$\,s (dominated by FFTLog) while the adjoint takes only
-${\sim}8$\,s.  The total per-iteration cost is ${\sim}130$\,s on
-388 threads for a 2\,mm lens at $\alpha=30^\circ$.  For 100
-iterations: ${\sim}3.6$ hours.
+${\sim}74$\,s while the adjoint takes only ${\sim}6$\,s.
+The Zygote gradient ratio is $1.08\times$ --- the adjoint adds
+only $8\%$ overhead.  Total per-iteration cost: ${\sim}80$\,s.
+For 100 iterations: ${\sim}2.2$ hours.
 
 \paragraph{Closure-boxing pitfall.}
 Writing \texttt{var = nothing} after a \texttt{@threads} loop in the
@@ -1815,29 +1815,29 @@ Each L-BFGS iteration requires one forward + backward evaluation:
 \toprule
 \textbf{Component} & \textbf{1 thread} & \textbf{388 threads} \\
 \midrule
-\texttt{prepare\_psf} (once) & ${\sim}40$\,s & ${\sim}40$\,s \\
-Forward (\texttt{psf\_intensity}) & --- & ${\sim}120$\,s \\
-Backward (\texttt{psf\_adjoint}) & --- & ${\sim}8$\,s \\
+\texttt{prepare\_psf} (once) & ${\sim}44$\,s & ${\sim}44$\,s \\
+Forward (\texttt{psf\_intensity}) & --- & ${\sim}74$\,s \\
+Backward (\texttt{psf\_adjoint}) & --- & ${\sim}6$\,s \\
 L-BFGS update & $< 0.1$\,s & $< 0.1$\,s \\
 \midrule
-\textbf{Total per iteration} & & ${\sim}\mathbf{130}$\,s \\
+\textbf{Total per iteration} & & ${\sim}\mathbf{80}$\,s \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-For 100 iterations of a 2\,mm lens at $\alpha = 30^\circ$: ${\sim}3.6$ hours
-on a 388-thread machine.  The surrogate model evaluation is negligible
-($< 1$\,ms for the mock model; a neural-network surrogate would add
-${\sim}10$\,ms per iteration).
+For 100 iterations of a 2\,mm lens at $\alpha = 30^\circ$: ${\sim}2.2$ hours
+on a 350-thread machine.  The adjoint adds only ${\sim}8\%$ overhead to the
+forward --- the Zygote gradient ratio is $1.08\times$ at production scale.
+The surrogate model evaluation is negligible ($< 1$\,ms for the mock model).
 
 \noindent
-\textbf{Note:} the adjoint (${\sim}8$\,s) is faster than the forward (${\sim}120$\,s)
-because the adjoint's fused Steps~5+4 (Graf + propagation) and Steps~3+2
-(FFTLog + modes) avoid the dominant forward costs (mode construction and FFTLog
-with fresh FFTW plan creation).  The forward cost is dominated by the mode
-construction (${\sim}55$\,s) and FFTLog (${\sim}44$\,s), which together account
-for ${\sim}80\%$ of the forward time.
+\textbf{Note:} the adjoint (${\sim}6$\,s) is much faster than the forward
+(${\sim}74$\,s) because the forward is dominated by FFTLog (${\sim}42$\,s)
+and propagation (${\sim}15$\,s), while the adjoint's fused Steps~5+4 (Graf
++ propagation, ${\sim}5$\,s) and Steps~3+2 (FFTLog + modes, ${\sim}3$\,s)
+are highly efficient due to @simd scatter patterns, Bessel truncation, and
+the elimination of the 53\,GB $\overline{\tilde a}$ intermediate.
 
 
 %=======================================================================

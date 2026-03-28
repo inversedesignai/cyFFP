@@ -116,15 +116,14 @@ dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)  # ~2.4-4× forward cost
 
 FD-verified to 1e-7 at N_cells up to 1667. Steps 5+4 (Graf+propagation) and Steps 3+2 (FFTLog+modes) of the adjoint are each fused to avoid large intermediate arrays (53 GB and 26 GB respectively eliminated).
 
-**Performance:** On a 2-socket 350-thread production machine (R=1000μm, α=30°, M=6303, Nr=65536):
-- Forward: **16s** (modes 0.2s + FFTLog 11s + prop 4s + graf 0.8s)
-- Adjoint: **~3s** (s5+4 ~1.6s + s3+2 ~0.6s)
-- Total iteration (fwd+adj): **~19s**
+**Production performance** (2-socket 350-thread machine, α=30°, NA=0.4):
 
-At full production scale (R=2000μm, M=12587, Nr=131072):
-- Forward: **~120s** (modes + FFTLog + prop + graf)
-- Adjoint: **~8s**
-- Total iteration: **~130s**
+| R (μm) | M_max | Forward | Zygote (fwd+adj) | Ratio |
+|--------|-------|---------|-------------------|-------|
+| 1000 | 6303 | 19s | 22s | 1.16× |
+| 2000 | 12587 | 74s | 80s | **1.08×** |
+
+The adjoint adds only **6s** to the 74s forward at full production scale. 100 L-BFGS iterations: **~2.2 hours**.
 
 **Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
 
