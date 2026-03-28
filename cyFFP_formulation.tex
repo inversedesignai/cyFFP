@@ -1682,10 +1682,23 @@ the loss function composition (indexing, arithmetic, etc.)\ outside the PSF
 computation.
 
 \paragraph{Scaling.}
-The adjoint/forward cost ratio follows ${\sim}0.7\,M_{\max}^{0.17}$, plateauing
-at ${\sim}2.4\times$ for $M_{\max} > 200$.  Extrapolated to production
-($M_{\max} \approx 12\,600$): ${\sim}4\times$, giving a total per-iteration cost
-of ${\sim}280$\,s on 388 threads for a 2\,mm lens at $\alpha=30^\circ$.
+After fixing a Julia closure-boxing issue (v1.3), the adjoint is
+significantly faster than the forward: at production scale
+($M_{\max} \approx 12\,600$, 350 threads), the forward takes
+${\sim}120$\,s (dominated by FFTLog) while the adjoint takes only
+${\sim}8$\,s.  The total per-iteration cost is ${\sim}130$\,s on
+388 threads for a 2\,mm lens at $\alpha=30^\circ$.  For 100
+iterations: ${\sim}3.6$ hours.
+
+\paragraph{Closure-boxing pitfall.}
+Writing \texttt{var = nothing} after a \texttt{@threads} loop in the
+same function scope causes Julia to infer the captured variable as
+\texttt{Union\{T, Nothing\}}, which forces every array access in the
+threaded closure into dynamically-dispatched boxed access
+(${\sim}100$\,ns per element instead of ${\sim}1$\,ns).  This caused
+a $15\times$ slowdown that appeared only on multi-threaded machines.
+Fix: never reassign captured variables to \texttt{nothing}; call
+\texttt{GC.gc()} instead.
 
 
 %=======================================================================
@@ -1802,21 +1815,29 @@ Each L-BFGS iteration requires one forward + backward evaluation:
 \toprule
 \textbf{Component} & \textbf{1 thread} & \textbf{388 threads} \\
 \midrule
-\texttt{prepare\_psf} (once) & ${\sim}15$\,s & ${\sim}15$\,s \\
-Forward (\texttt{psf\_intensity}) & ${\sim}55$\,s & ${\sim}55$\,s \\
-Backward (\texttt{psf\_adjoint}) & ${\sim}2$--$4\times$ fwd & ${\sim}2$--$4\times$ fwd \\
+\texttt{prepare\_psf} (once) & ${\sim}40$\,s & ${\sim}40$\,s \\
+Forward (\texttt{psf\_intensity}) & --- & ${\sim}120$\,s \\
+Backward (\texttt{psf\_adjoint}) & --- & ${\sim}8$\,s \\
 L-BFGS update & $< 0.1$\,s & $< 0.1$\,s \\
 \midrule
-\textbf{Total per iteration} & & ${\sim}170$--$280$\,s \\
+\textbf{Total per iteration} & & ${\sim}\mathbf{130}$\,s \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-For 100 iterations of a 2\,mm lens at $\alpha = 30^\circ$: ${\sim}5$--$8$ hours
+For 100 iterations of a 2\,mm lens at $\alpha = 30^\circ$: ${\sim}3.6$ hours
 on a 388-thread machine.  The surrogate model evaluation is negligible
 ($< 1$\,ms for the mock model; a neural-network surrogate would add
 ${\sim}10$\,ms per iteration).
+
+\noindent
+\textbf{Note:} the adjoint (${\sim}8$\,s) is faster than the forward (${\sim}120$\,s)
+because the adjoint's fused Steps~5+4 (Graf + propagation) and Steps~3+2
+(FFTLog + modes) avoid the dominant forward costs (mode construction and FFTLog
+with fresh FFTW plan creation).  The forward cost is dominated by the mode
+construction (${\sim}55$\,s) and FFTLog (${\sim}44$\,s), which together account
+for ${\sim}80\%$ of the forward time.
 
 
 %=======================================================================
