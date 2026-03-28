@@ -1658,14 +1658,14 @@ $\partial\mathcal{L}/\partial t$ given $\partial\mathcal{L}/\partial I_{\mathrm{
 \paragraph{Zygote automatic differentiation.}
 The function \texttt{psf\_intensity(plan, t\_vals)} returns only the
 unnormalised PSF intensity $I_{\mathrm{raw}}$ as a plain \texttt{Matrix\{Float64\}}.
-A \texttt{ChainRulesCore.rrule} is defined in the separate file
-\texttt{cyffp\_zygote.jl}, which intercepts \texttt{psf\_intensity} and routes
-the adjoint through \texttt{psf\_adjoint}.
+A \texttt{ChainRulesCore.rrule} is defined automatically inside
+\texttt{cyffp.jl} when ChainRulesCore is loaded before the module.
+It intercepts \texttt{psf\_intensity} and routes the adjoint through
+\texttt{psf\_adjoint}.
 
 \begin{verbatim}
+  using ChainRulesCore, Zygote   % must be BEFORE cyffp.jl
   include("cyffp.jl");  using .CyFFP
-  using ChainRulesCore, Zygote
-  include("cyffp_zygote.jl")
 
   plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
   grad = Zygote.gradient(t -> begin

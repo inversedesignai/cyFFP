@@ -1986,14 +1986,14 @@ Compute the PSF intensity (unnormalized) on a Cartesian grid.
 Returns just the `I_raw` matrix from `execute_psf`.
 
 This is the recommended entry point for Zygote differentiation:
-the rrule in `cyffp_zygote.jl` is defined for this function and
+the rrule (defined automatically when ChainRulesCore is loaded) is for this function and
 returns/receives a plain matrix (no NamedTuple cotangent handling).
 
 # Example
 ```julia
 include("cyffp.jl"); using .CyFFP
 using ChainRulesCore, Zygote
-include("cyffp_zygote.jl")
+using ChainRulesCore   # load BEFORE include("cyffp.jl") to enable rrule
 
 plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
 grad = Zygote.gradient(t -> begin
@@ -2019,36 +2019,50 @@ end
 
 
 # ═══════════════════════════════════════════════════════════════
-# ChainRulesCore/Zygote integration
+# ChainRulesCore/Zygote integration (auto-detected)
 #
-# Defined in cyffp_zygote.jl (separate file).
-# Include it after loading CyFFP and ChainRulesCore:
+# If ChainRulesCore is loaded BEFORE include("cyffp.jl"), the rrule
+# for psf_intensity is defined automatically.  No separate file needed.
 #
+# Usage:
+#   using ChainRulesCore, Zygote   # load BEFORE cyffp.jl
 #   include("cyffp.jl"); using .CyFFP
-#   using ChainRulesCore, Zygote
-#   include("cyffp_zygote.jl")
 #
 #   plan = prepare_psf(...)
 #   grad = Zygote.gradient(t -> begin
-#       I = psf_intensity(plan, t)    # recommended: returns plain Matrix
+#       I = psf_intensity(plan, t)
 #       return -I[cy, cx]
 #   end, t_vals)
 #
-# The rrule is defined for psf_intensity (returns Matrix{Float64})
-# rather than execute_psf (returns NamedTuple) to avoid fragile
-# cotangent extraction from structured types.
-#
-# psf_adjoint is still available for manual gradient computation
-# without any AD framework.
+# If ChainRulesCore is NOT loaded, psf_adjoint is still available
+# for manual gradient computation.
 # ═══════════════════════════════════════════════════════════════
 
-# ChainRulesCore/Zygote integration is defined in cyffp_zygote.jl.
-# Include it after loading CyFFP and ChainRulesCore:
-#
-#   include("cyffp.jl"); using .CyFFP
-#   using ChainRulesCore, Zygote
-#   include("cyffp_zygote.jl")
-#
-# Then Zygote.gradient works on any loss involving execute_psf.
+const _CRC_PKGID = Base.PkgId(Base.UUID("d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"), "ChainRulesCore")
+
+if haskey(Base.loaded_modules, _CRC_PKGID)
+    @eval begin
+        import ChainRulesCore
+
+        function ChainRulesCore.rrule(::typeof(psf_intensity),
+                                       plan::PSFPlan,
+                                       t_vals::Vector{ComplexF64})
+            result = execute_psf(plan, t_vals)
+            I_raw  = result.I_raw
+
+            function psf_intensity_pullback(Δ_I_raw)
+                dL_dI = if Δ_I_raw isa ChainRulesCore.AbstractZero
+                    zeros(Float64, plan.Nxy, plan.Nxy)
+                else
+                    Float64.(real.(Δ_I_raw))
+                end
+                dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)
+                return ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(), dL_dt
+            end
+
+            return I_raw, psf_intensity_pullback
+        end
+    end
+end
 
 end  # module CyFFP

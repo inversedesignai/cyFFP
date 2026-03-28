@@ -22,10 +22,9 @@
         '
 """
 
+using ChainRulesCore, Zygote       # must be BEFORE include("cyffp.jl")
 include("cyffp.jl")
 using .CyFFP
-using ChainRulesCore, Zygote
-include("cyffp_zygote.jl")
 using LinearAlgebra: dot
 
 function run_adjoint_production(;

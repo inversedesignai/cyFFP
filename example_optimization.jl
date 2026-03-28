@@ -28,11 +28,10 @@
 # 0. Setup
 # ═══════════════════════════════════════════════════════════════
 
+using ChainRulesCore, Zygote       # must be BEFORE include("cyffp.jl")
+
 include("cyffp.jl")
 using .CyFFP
-
-using ChainRulesCore, Zygote
-include("cyffp_zygote.jl")       # defines rrule for psf_intensity
 
 using Optim                       # L-BFGS optimizer
 using LinearAlgebra: norm
@@ -99,7 +98,7 @@ end
 #
 # Zygote differentiates through the entire chain:
 #   - surrogate: element-wise exp, Zygote handles natively
-#   - psf_intensity: custom rrule via cyffp_zygote.jl
+#   - psf_intensity: custom rrule (auto-defined when ChainRulesCore loaded)
 #   - efficiency: indexing + sum, Zygote handles natively
 # ═══════════════════════════════════════════════════════════════
 

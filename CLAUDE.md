@@ -128,33 +128,30 @@ At full production scale (R=2000μm, M=12587, Nr=131072):
 
 **Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
 
-### Differentiable PSF for Zygote (`psf_intensity`, `cyffp_zygote.jl`)
+### Differentiable PSF for Zygote (`psf_intensity`)
 
 **`psf_intensity(plan, t_vals) → Matrix{Float64}`**: returns just the unnormalized PSF intensity (I_raw) as a plain matrix. This is the recommended entry point for Zygote differentiation — the rrule receives/returns a plain matrix cotangent, avoiding fragile NamedTuple extraction.
 
 **Setup and usage:**
 ```julia
-# 1. Load the module
+# 1. Load AD packages BEFORE cyffp.jl (so the rrule is auto-defined)
+using ChainRulesCore, Zygote
+
+# 2. Load the module
 include("cyffp.jl")
 using .CyFFP
 
-# 2. Load AD packages
-using ChainRulesCore, Zygote
-
-# 3. Load the rrule (must be after both CyFFP and ChainRulesCore)
-include("cyffp_zygote.jl")
-
-# 4. Create a plan (once)
+# 3. Create a plan (once)
 plan = prepare_psf(0.3, 6667; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
 
-# 5. Differentiate any loss function involving psf_intensity
+# 4. Differentiate any loss function involving psf_intensity
 grad = Zygote.gradient(t -> begin
     I = psf_intensity(plan, t)
     return -I[cy, cx] / (sum(I) + 1e-10)   # Strehl-like loss
 end, t_vals)[1]
 ```
 
-The rrule intercepts `psf_intensity` and uses `psf_adjoint` internally. Zygote automatically differentiates everything outside (loss composition, indexing, arithmetic). The load order of `cyffp.jl` does not matter — only `cyffp_zygote.jl` must be included after both `CyFFP` and `ChainRulesCore` are available.
+The rrule is defined automatically inside `cyffp.jl` when ChainRulesCore is detected as already loaded. No separate file needed. Zygote differentiates everything outside `psf_intensity` (loss composition, indexing, arithmetic) while the rrule routes the PSF gradient through `psf_adjoint`.
 
 ## Key Design Decisions
 
