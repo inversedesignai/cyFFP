@@ -18,7 +18,7 @@
         ] add ChainRulesCore Zygote Optim
 
     Run with:
-        julia -t auto example_optimization.jl
+        julia -t 388 example_optimization.jl   # use physical core count
 
     NOTE: This file is a template.  Adjust physical parameters, surrogate
     model, and loss function to your actual design problem.
@@ -184,7 +184,7 @@ println("  Initial focusing efficiency: $(round(100*eff0, digits=2))%")
 #   - g!(G, x): in-place gradient
 #
 # We use Zygote.withgradient to compute both in a single forward+backward
-# pass (the rrule ensures execute_psf is not called twice).
+# pass (the rrule ensures psf_intensity is not called twice).
 #
 # Optim also supports a combined fg! interface that returns both the
 # value and fills the gradient — this is the most efficient pattern.
