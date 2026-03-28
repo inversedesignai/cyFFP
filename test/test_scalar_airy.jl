@@ -13,7 +13,7 @@
     Run with: julia test_scalar_airy.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using FFTW
 using SpecialFunctions: besselj

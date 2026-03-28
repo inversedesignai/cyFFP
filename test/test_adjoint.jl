@@ -9,7 +9,7 @@
     Run with: julia test_adjoint.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using LinearAlgebra: dot
 

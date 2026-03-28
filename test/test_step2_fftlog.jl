@@ -14,7 +14,7 @@
     Run with:  julia test_step2_fftlog.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using SpecialFunctions: besselj
 using QuadGK

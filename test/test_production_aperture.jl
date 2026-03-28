@@ -13,7 +13,7 @@
     Run with: julia -t auto test_production_aperture.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using SpecialFunctions: besselj
 using LinearAlgebra: dot

@@ -12,7 +12,7 @@
     Run with: julia test_adjoint_scaling.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using LinearAlgebra: dot
 using Statistics: mean

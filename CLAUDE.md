@@ -12,33 +12,33 @@ CyFFP is a Julia module for **cylindrical near-to-far-field propagation** using 
 
 ```bash
 # Step-by-step unit tests
-julia test_step1.jl          # Angular decomposition
-julia test_step2_fftlog.jl   # FFTLog Hankel transform
-julia test_step3.jl          # Scalar propagation + symmetry
-julia test_step4.jl          # Graf shift
-julia test_step5.jl          # Inverse Hankel
-julia test_step6.jl          # Angular synthesis + full pipeline Airy
+julia test/test_step1.jl          # Angular decomposition
+julia test/test_step2_fftlog.jl   # FFTLog Hankel transform
+julia test/test_step3.jl          # Scalar propagation + symmetry
+julia test/test_step4.jl          # Graf shift
+julia test/test_step5.jl          # Inverse Hankel
+julia test/test_step6.jl          # Angular synthesis + full pipeline Airy
 
 # End-to-end validation
-julia test_scalar_airy.jl         # Airy disk with small lens (R=3λ)
-julia test_bruteforce_reference.jl # QuadGK cross-check
+julia test/test_scalar_airy.jl         # Airy disk with small lens (R=3λ)
+julia test/test_bruteforce_reference.jl # QuadGK cross-check
 
 # Scaling validation (R=3λ..1000λ, up to 558 modes)
-julia test_scaling.jl
+julia test/test_scaling.jl
 
 # Neumann path validation
-julia test_neumann.jl
+julia test/test_neumann.jl
 
 # Maximum-scale tests (up to 1581 modes)
-julia test_maxscale.jl
+julia test/test_maxscale.jl
 
 # Adjoint (gradient) validation
-julia test_adjoint.jl              # FD checks at 4 loss functions
-julia test_adjoint_scaling.jl      # Scaling study M=53..1112
+julia test/test_adjoint.jl              # FD checks at 4 loss functions
+julia test/test_adjoint_scaling.jl      # Scaling study M=53..1112
 
 # Production scale (needs ~37 GB for full M_max)
-julia -t auto test_production_aperture.jl
-julia -t auto test_production_psf.jl   # Ideal oblique + Neumann comparison
+julia -t auto test/test_production_aperture.jl
+julia -t auto test/test_production_psf.jl   # Ideal oblique + Neumann comparison
 ```
 
 Start Julia with `-t N` for N threads. The module uses `Threads.@threads` for shared-memory parallelism (no Distributed).
@@ -165,7 +165,7 @@ The rrule is defined automatically inside `cyffp.jl` when ChainRulesCore is dete
 
 ## Formulation
 
-- `cyFFP_formulation.tex` — Self-contained formulation document: scalar proof, FFTLog, Graf derivation, Neumann shift theorem, cost analysis, adjoint derivation. TE/TM retained in Appendix A for reference.
+- `doc/cyFFP_formulation.tex` — Self-contained formulation document: scalar proof, FFTLog, Graf derivation, Neumann shift theorem, cost analysis, adjoint derivation. TE/TM retained in Appendix A for reference.
 - `cyFFP0.pdf`, `cyFFP1.pdf`, `cyFFP2.pdf` — Historical derivation PDFs (superseded by tex document).
 
 ## Deleted Files (for historical reference)

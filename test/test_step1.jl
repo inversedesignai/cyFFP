@@ -6,7 +6,7 @@
     Run with:  julia test_step1.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using FFTW
 using SpecialFunctions: besselj

@@ -15,7 +15,7 @@
     Run with: julia test_step5.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using SpecialFunctions: besselj
 using QuadGK

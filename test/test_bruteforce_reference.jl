@@ -13,7 +13,7 @@
     Run with: julia test_bruteforce_reference.jl
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using FFTW
 using SpecialFunctions: besselj

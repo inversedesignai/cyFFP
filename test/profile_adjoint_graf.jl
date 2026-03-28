@@ -24,7 +24,7 @@
         julia -t 1   profile_adjoint_graf.jl   # single-thread baseline
 """
 
-include("cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 
 println("="^70)

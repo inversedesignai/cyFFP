@@ -22,8 +22,8 @@
         '
 """
 
-using ChainRulesCore, Zygote       # must be BEFORE include("cyffp.jl")
-include("cyffp.jl")
+using ChainRulesCore, Zygote       # must be BEFORE include("../cyffp.jl")
+include("../cyffp.jl")
 using .CyFFP
 using LinearAlgebra: dot
 
