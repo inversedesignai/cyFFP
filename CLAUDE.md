@@ -116,18 +116,17 @@ dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)  # ~2.4-4× forward cost
 
 FD-verified to 1e-7 at N_cells up to 1667. Steps 5+4 (Graf+propagation) and Steps 3+2 (FFTLog+modes) of the adjoint are each fused to avoid large intermediate arrays (53 GB and 26 GB respectively eliminated).
 
-**Known performance issue — adjoint Graf shift bottleneck:**
+**Performance:** On a 2-socket 350-thread production machine (R=1000μm, α=30°, M=6303, Nr=65536):
+- Forward: **16s** (modes 0.2s + FFTLog 11s + prop 4s + graf 0.8s)
+- Adjoint: **~3s** (s5+4 ~1.6s + s3+2 ~0.6s)
+- Total iteration (fwd+adj): **~19s**
 
-On a 2-socket 350-thread production machine (R=1000μm, α=30°, M=6303, Nr=65536):
-- Forward: **33s** (modes 15s + FFTLog 11s + prop 4s + graf 0.8s)
-- Adjoint: **~250s** (s5+4 ~226s + s3+2 ~22s)
-- The fused s5+4 (Graf+prop adjoint) takes **226s** while the forward graf takes **0.8s** — a 280× gap
+At full production scale (R=2000μm, M=12587, Nr=131072):
+- Forward: **~120s** (modes + FFTLog + prop + graf)
+- Adjoint: **~8s**
+- Total iteration: **~130s**
 
-The adjoint s5+4 does ~2× the FLOPs of the forward (pos+neg Bessel sums), but the theoretical compute time is ~10ms on 350 threads. The 226s actual time (20,000× overhead) is unexplained. GC was ruled out (pre-allocated buffers). The bottleneck appears hardware-specific to the multi-socket NUMA machine.
-
-**Diagnosis needed:** Run `julia -t 350 profile_adjoint_graf.jl` and `julia -t 1 profile_adjoint_graf.jl`. The script isolates each component (Bessel, scatter loop, zeroing, write-back) and compares single-thread vs multi-thread to identify whether the issue is NUMA, cache coherence, thread scheduling, or @simd not vectorizing. The "Estimated vs actual" comparison at the end quantifies the overhead factor.
-
-On a single-thread local machine, the adjoint/forward ratio is ~2.5× (expected). The production-machine ratio of ~8× suggests a threading/memory issue specific to the 2-socket topology.
+**Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
 
 ### Differentiable PSF for Zygote (`psf_intensity`, `cyffp_zygote.jl`)
 

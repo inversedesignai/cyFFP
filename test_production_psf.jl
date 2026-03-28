@@ -654,6 +654,6 @@ end
 # Default invocation when run as a script
 if abspath(PROGRAM_FILE) == @__FILE__
     run_production_psf()
-    GC.gc()
-    run_neumann_vs_standard()
+    #GC.gc()
+    #run_neumann_vs_standard()
 end

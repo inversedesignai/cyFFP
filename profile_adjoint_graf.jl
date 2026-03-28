@@ -45,7 +45,7 @@ x0 = f_val * tan(alpha)
 kx = k * sin(alpha)
 
 plan = prepare_psf(pitch, N_cells; lambda_um=lambda_um, alpha_deg=30.0, NA=NA,
-                   Nxy=31, L_max=8, N_psi=16)
+                   Nxy=31, L_max=8, N_psi=32)
 Nr = plan.Nr
 M_max = plan.M_max
 L_max = plan.L_max

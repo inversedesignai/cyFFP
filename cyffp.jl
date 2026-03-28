@@ -1152,7 +1152,7 @@ function compute_psf(t_vals::Vector{ComplexF64},
         a_m, kr_grid = compute_scalar_coeffs(u_m, m_pos, r_log)
     end
     println("$(round(timings["step2"], digits=1))s")
-    u_m = nothing; GC.gc()
+    GC.gc()  # do NOT reassign to nothing — poisons @threads closure types
 
     # ─── Step 3: propagation + symmetry ───────────────────────
     print("  Step 3 (propagate)... ")
@@ -1160,7 +1160,7 @@ function compute_psf(t_vals::Vector{ComplexF64},
         a_tilde, m_full = propagate_scalar(a_m, m_pos, collect(kr_grid), k, f_val)
     end
     println("$(round(timings["step3"], digits=1))s")
-    a_m = nothing; GC.gc()
+    GC.gc()
 
     # ─── Step 4: Graf shift ───────────────────────────────────
     print("  Step 4 (Graf shift)... ")
@@ -1168,7 +1168,7 @@ function compute_psf(t_vals::Vector{ComplexF64},
         B = graf_shift(a_tilde, m_full, collect(kr_grid), x0, L_max; k=k)
     end
     println("$(round(timings["step4"], digits=1))s")
-    a_tilde = nothing; GC.gc()
+    GC.gc()
 
     # ─── Step 5: inverse Hankel ───────────────────────────────
     print("  Step 5 (inverse Hankel)... ")
@@ -1498,19 +1498,19 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
     timings["step2"] = @elapsed begin
         a_m, _ = compute_scalar_coeffs(u_m, m_pos, plan.r_log)
     end
-    u_m = nothing; GC.gc()
+    GC.gc()  # do NOT reassign to nothing — poisons @threads closure types
 
     # ── Step 3: propagation + symmetry ──
     timings["step3"] = @elapsed begin
         a_tilde, m_full = propagate_scalar(a_m, m_pos, plan.kr, plan.k, plan.f_val)
     end
-    a_m = nothing; GC.gc()
+    GC.gc()
 
     # ── Step 4: Graf shift ──
     timings["step4"] = @elapsed begin
         B = graf_shift(a_tilde, m_full, plan.kr, plan.x0, plan.L_max; k=plan.k)
     end
-    a_tilde = nothing; GC.gc()
+    GC.gc()
 
     # ── Step 5: inverse Hankel ──
     timings["step5"] = @elapsed begin
@@ -1823,10 +1823,10 @@ function psf_adjoint(plan::PSFPlan,
     kz       = @. sqrt(complex(plan.k^2 - kr.^2))
     prop_conj = @. ifelse(kr < plan.k, exp(-im * real(kz) * plan.f_val), zero(ComplexF64))
 
+    nt_adj = _nworkspaces()
     a_bar = zeros(ComplexF64, Nr, M_max + 1)
 
-    # Per-thread local buffers for the scatter pattern (fits in L2)
-    nt_adj = _nworkspaces()
+    # Per-thread local buffers (fit in L2 cache)
     pos_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
     neg_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
     jw_bufs  = [Vector{Float64}(undef, 2(M_max + L_max) + 1) for _ in 1:nt_adj]
@@ -1862,7 +1862,7 @@ function psf_adjoint(plan::PSFPlan,
             buf_neg[m + 1] = zero(ComplexF64)
         end
 
-        # Scatter pattern: l outer (31), m inner (up to M, @simd-able)
+        # Scatter pattern: l outer (17), m inner (up to M, @simd-able)
         # ā_tilde_m   += B̄_l × Jw[m - l]    (positive)
         # ā_tilde_{-m} += B̄_l × Jw[-m - l]   (negative)
         @inbounds for (li, l) in enumerate(-L_max:L_max)
@@ -1884,7 +1884,6 @@ function psf_adjoint(plan::PSFPlan,
         end
 
         # Combine: ā_m = prop* × (ā_tilde_m + (-1)^m ā_tilde_{-m})
-        # For m=0: no negative counterpart (ā_tilde_0 is used once, not doubled)
         @inbounds begin
             a_bar[ikr, 1] = pc * buf_pos[1]
             for m in 1:m_eff
@@ -1894,7 +1893,7 @@ function psf_adjoint(plan::PSFPlan,
         end
     end
 
-    B_bar = nothing; GC.gc()
+    GC.gc()  # free B_bar (do NOT reassign to nothing — poisons @threads closure types)
     adj_timings["s5_4_graf_prop"] = time() - _t0; _t0 = time()
 
     # ─── Steps 3+2 fused adjoint: FFTLog + mode construction ──
@@ -1941,7 +1940,7 @@ function psf_adjoint(plan::PSFPlan,
         end
     end
 
-    a_bar = nothing; GC.gc()
+    GC.gc()  # free a_bar (do NOT reassign to nothing — poisons @threads closure types)
 
     # Reduce per-thread accumulators
     t_log_bar = t_log_bar_locals[1]
