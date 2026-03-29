@@ -1520,15 +1520,58 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
     end
     GC.gc()  # do NOT reassign to nothing — poisons @threads closure types
 
-    # ── Step 3: propagation + symmetry ──
-    timings["step3"] = @elapsed begin
-        a_tilde, m_full = propagate_scalar(a_m, m_pos, plan.kr, plan.k, plan.f_val)
-    end
-    GC.gc()
+    # ── Steps 3+4 fused: propagation + Graf shift ──
+    # Computes B directly from a_m without materializing a_tilde[Nr, 2M+1]
+    # (53 GB at production).  For each kr, the propagated coefficient
+    # ã_n is computed on the fly:
+    #   n >= 0: ã_n = a_m[ikr, n+1] * prop[ikr]
+    #   n <  0: ã_n = (-1)^|n| * a_m[ikr, |n|+1] * prop[ikr]
+    kz_fwd   = @. sqrt(complex(plan.k^2 - plan.kr.^2))
+    prop_fwd = @. ifelse(plan.kr < plan.k, exp(im * real(kz_fwd) * plan.f_val), zero(ComplexF64))
 
-    # ── Step 4: Graf shift ──
-    timings["step4"] = @elapsed begin
-        B = graf_shift(a_tilde, m_full, plan.kr, plan.x0, plan.L_max; k=plan.k)
+    L_max = plan.L_max
+    Nl    = 2L_max + 1
+    B     = zeros(ComplexF64, Nr, Nl)
+
+    nt_g = _nworkspaces()
+    jp_g = [Vector{Float64}(undef, M_max + 21) for _ in 1:nt_g]
+    jw_g = [Vector{Float64}(undef, 2M_max + 1) for _ in 1:nt_g]
+
+    timings["step3_4"] = @elapsed begin
+        Threads.@threads for ikr in 1:Nr
+            plan.kr[ikr] > plan.k && continue
+
+            tid   = Threads.threadid()
+            kr_x0 = plan.kr[ikr] * plan.x0
+            m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
+            pv    = prop_fwd[ikr]
+
+            # Bessel weights (in-place, no GC)
+            _besselj_range!(jp_g[tid], m_cut, kr_x0)
+            Jw = jw_g[tid]
+            @inbounds for d in 0:m_cut
+                Jw[d + m_cut + 1] = jp_g[tid][d + 1]
+                Jw[-d + m_cut + 1] = iseven(d) ? jp_g[tid][d + 1] : -jp_g[tid][d + 1]
+            end
+
+            # B_l = Σ_m ã_{m+l} J_m  where ã_n is computed on the fly from a_m
+            @inbounds for (li, l) in enumerate(-L_max:L_max)
+                acc = zero(ComplexF64)
+                m_lo = max(-m_cut, -M_max - l)
+                m_hi = min( m_cut,  M_max - l)
+                @simd for m in m_lo:m_hi
+                    n = m + l   # mode index in a_tilde
+                    n_abs = abs(n)
+                    # ã_n = a_m[:,|n|+1] * prop * ((-1)^|n| if n < 0)
+                    a_n = a_m[ikr, n_abs + 1] * pv
+                    if n < 0 && isodd(n_abs)
+                        a_n = -a_n
+                    end
+                    acc += a_n * Jw[m + m_cut + 1]
+                end
+                B[ikr, li] = acc
+            end
+        end
     end
     GC.gc()
 
@@ -1588,7 +1631,7 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
     peak_y   = y_um[peak_idx[1]]
 
     t_total = sum(values(timings))
-    println("execute_psf: $(round(t_total, digits=1))s  (modes=$(round(timings["modes"], digits=1))  FFTLog=$(round(timings["step2"], digits=1))  prop=$(round(timings["step3"], digits=1))  graf=$(round(timings["step4"], digits=1))  invHT=$(round(timings["step5"], digits=1))  synth=$(round(timings["step6"], digits=1)))")
+    println("execute_psf: $(round(t_total, digits=1))s  (modes=$(round(timings["modes"], digits=1))  FFTLog=$(round(timings["step2"], digits=1))  prop+graf=$(round(timings["step3_4"], digits=1))  invHT=$(round(timings["step5"], digits=1))  synth=$(round(timings["step6"], digits=1)))")
 
     return (
         I          = I_cart,
