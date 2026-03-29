@@ -1488,15 +1488,35 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
         end
     end
 
-    # ── Step 2: FFTLog via compute_scalar_coeffs ──
-    # Call the standalone function rather than using plan.workspaces.
-    # This creates fresh FFTW plans and buffers each call, which
-    # ensures correct NUMA affinity on multi-socket machines (plans
-    # are allocated on the same NUMA node as the executing threads).
-    # The ~10s workspace creation overhead is small compared to the
-    # ~50s FFTLog computation.
+    # ── Step 2: FFTLog with plan.kernels + fresh FFTW workspaces ──
+    # Reuses precomputed kernels from plan (saves ~36s Γ-recurrence)
+    # but creates fresh FFTW workspaces for NUMA affinity (plans on
+    # the correct NUMA node for the executing threads).
+    a_m = zeros(ComplexF64, Nr, M_max + 1)
     timings["step2"] = @elapsed begin
-        a_m, _ = compute_scalar_coeffs(u_m, m_pos, plan.r_log)
+        nt_s2 = _nworkspaces()
+        ws_s2 = [_make_workspace(Nr, dln) for _ in 1:nt_s2]
+        g_s2  = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt_s2]
+
+        Threads.@threads for idx in 1:M_max+1
+            tid = Threads.threadid()
+            ws  = ws_s2[tid]
+            g   = g_s2[tid]
+            m   = m_pos[idx]
+            m_abs    = abs(m)
+            neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
+
+            @inbounds for j in 1:Nr
+                g[j] = plan.r_log[j] * u_m[j, idx]
+            end
+
+            _fftlog_with_kernel!(view(a_m, :, idx), ws, g,
+                                 view(plan.kernels, :, m_abs + 1), neg_sign)
+
+            @inbounds for j in 1:Nr
+                a_m[j, idx] /= plan.kr[j]
+            end
+        end
     end
     GC.gc()  # do NOT reassign to nothing — poisons @threads closure types
 
