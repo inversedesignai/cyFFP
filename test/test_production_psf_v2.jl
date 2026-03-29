@@ -279,48 +279,94 @@ function run_production_psf_v2(;
 
     println("\n  All PSF checks PASSED ✓")
 
-    # ─── Plots ───────────────────────────────────────────────
+    # ─── Plots (matching test_production_psf.jl format) ─────
     if do_plots && HAS_PLOTS
         println("\n--- Generating plots ---")
 
-        # Cartesian interpolation for 2D heatmap
-        hw = psf_hw; dpsi = psi[2] - psi[1]
-        x_cart = range(-hw, hw, length=Nxy); y_cart = range(-hw, hw, length=Nxy)
-        I_cart = zeros(Nxy, Nxy)
-        @inbounds for ix in 1:Nxy, iy in 1:Nxy
-            xv = x_cart[ix]; yv = y_cart[iy]
-            rv = sqrt(xv^2 + yv^2)
-            (rv < rho[1] || rv > rho[end]) && continue
-            pv = atan(yv, xv); pv < 0 && (pv += 2π)
-            lr = log(rv); lr0 = log(rho[1])
-            idx_r = (lr - lr0) / dln + 1.0
-            j0 = clamp(floor(Int, idx_r), 1, Nr-1); wr = idx_r - j0
-            idx_p = pv / dpsi + 1.0
-            p0 = clamp(floor(Int, idx_p), 1, N_psi)
-            p1 = p0 == N_psi ? 1 : p0 + 1; wp = idx_p - p0
-            I_cart[iy,ix] = (1-wr)*(1-wp)*I_polar[j0,p0] + wr*(1-wp)*I_polar[j0+1,p0] +
-                            (1-wr)*wp*I_polar[j0,p1] + wr*wp*I_polar[j0+1,p1]
+        rho_plot_max = rho_max_lambda * lambda_um
+
+        # ── 1D radial profiles ──
+        rho_fine = range(0.001, rho_max_lambda, length=300) .* lambda_um
+        airy_th = map(rho_fine) do rv
+            v = k * NA_eff_sag * rv
+            v < 1e-10 ? 1.0 : (2 * besselj(1, v) / v)^2
         end
-        I_cart ./= maximum(I_cart)
 
         p1 = plot(rho ./ lambda_um, I_avg ./ I_peak,
                   label="ψ-averaged", lw=2,
                   xlabel="ρ / λ", ylabel="I / I_peak",
-                  title="PSF v2: R=$(R)μm, α=$(alpha_deg)°, NA=$(NA)",
+                  title="PSF: R=$(R)μm, α=$(alpha_deg)°, NA=$(NA)",
                   xlims=(0, rho_max_lambda), ylims=(-0.05, 1.05),
                   legend=:topright, size=(750, 480))
-        rho_fine = range(0.001, rho_max_lambda, length=300) .* lambda_um
-        airy_th = [let v=k*NA_eff_sag*rv; v<1e-10 ? 1.0 : (2*besselj(1,v)/v)^2; end for rv in rho_fine]
-        plot!(p1, rho_fine ./ lambda_um, airy_th, label="Airy (sag NA)", lw=2, color=:red, ls=:dot)
-        savefig(p1, "$(prefix)_psf_1d.png"); println("  Saved: $(prefix)_psf_1d.png")
+        plot!(p1, rho ./ lambda_um, I_tang ./ I_peak,
+              label="ψ=0° (tangential)", lw=1.5, ls=:dash)
+        plot!(p1, rho ./ lambda_um, I_sag ./ I_sag_peak,
+              label="ψ=90° (sagittal)", lw=1.5, ls=:dashdot)
+        plot!(p1, rho_fine ./ lambda_um, airy_th,
+              label="Airy (sagittal NA)", lw=2, color=:red, ls=:dot)
+        vline!(p1, [rho_airy / lambda_um],
+               label="", ls=:dot, color=:gray, lw=0.5)
 
-        p2 = heatmap(collect(x_cart) ./ lambda_um, collect(y_cart) ./ lambda_um, I_cart;
-                     xlabel="x / λ", ylabel="y / λ", color=:inferno,
-                     title="PSF v2: R=$(R)μm, α=$(alpha_deg)°",
-                     aspect_ratio=:equal, size=(600, 550), clims=(0, 1))
-        th_c = range(0, 2π, length=100); rl = rho_airy / lambda_um
-        plot!(p2, rl.*cos.(th_c), rl.*sin.(th_c), label="Airy zero", color=:white, ls=:dash, lw=1.5)
-        savefig(p2, "$(prefix)_psf_2d.png"); println("  Saved: $(prefix)_psf_2d.png")
+        fname1 = "$(prefix)_psf_1d.png"
+        savefig(p1, fname1)
+        println("  Saved: $fname1")
+
+        # ── 2D heatmap on uniform Cartesian grid ──
+        xy_max = rho_plot_max
+        x_cart = range(-xy_max, xy_max, length=Nxy) ./ lambda_um
+        y_cart = range(-xy_max, xy_max, length=Nxy) ./ lambda_um
+        dpsi   = psi[2] - psi[1]
+
+        I_cart = zeros(Nxy, Nxy)
+        for (ix, xv_lam) in enumerate(x_cart)
+            for (iy, yv_lam) in enumerate(y_cart)
+                xv = xv_lam * lambda_um
+                yv = yv_lam * lambda_um
+                rv = sqrt(xv^2 + yv^2)
+                (rv < rho[1] || rv > rho[end]) && continue
+                pv = atan(yv, xv); pv < 0 && (pv += 2π)
+                lr = log(rv); lr0 = log(rho[1])
+                idx_r = (lr - lr0) / dln + 1.0
+                j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+                idx_p = pv / dpsi + 1.0
+                p0 = clamp(floor(Int, idx_p), 1, N_psi)
+                p1_idx = p0 == N_psi ? 1 : p0 + 1; wp = idx_p - p0
+                I_cart[iy, ix] = (
+                    (1-wr)*(1-wp)*I_polar[j0, p0]     + wr*(1-wp)*I_polar[j0+1, p0] +
+                    (1-wr)*wp    *I_polar[j0, p1_idx]  + wr*wp    *I_polar[j0+1, p1_idx]
+                )
+            end
+        end
+        I_cart ./= maximum(I_cart)
+
+        p2 = heatmap(collect(x_cart), collect(y_cart), I_cart;
+                     xlabel="x / λ", ylabel="y / λ",
+                     color=:inferno, clims=(0, 1),
+                     title="PSF: R=$(R)μm, α=$(alpha_deg)°, NA=$(NA)",
+                     aspect_ratio=:equal, size=(600, 550))
+        th_c = range(0, 2π, length=100)
+        rl = rho_airy / lambda_um
+        plot!(p2, rl .* cos.(th_c), rl .* sin.(th_c),
+              label="Airy zero (sag)", color=:white, ls=:dash, lw=1.5)
+
+        fname2 = "$(prefix)_psf_2d.png"
+        savefig(p2, fname2)
+        println("  Saved: $fname2")
+
+        # ── Log-scale heatmap (shows sidelobes) ──
+        I_cart_log = log10.(clamp.(I_cart, 1e-6, 1.0))
+
+        p3 = heatmap(collect(x_cart), collect(y_cart), I_cart_log;
+                     xlabel="x / λ", ylabel="y / λ",
+                     color=:inferno, clims=(-4, 0),
+                     title="PSF (log₁₀): R=$(R)μm, α=$(alpha_deg)°",
+                     aspect_ratio=:equal, size=(600, 550))
+        plot!(p3, rl .* cos.(th_c), rl .* sin.(th_c),
+              label="Airy zero (sag)", color=:white, ls=:dash, lw=1.5)
+
+        fname3 = "$(prefix)_psf_2d_log.png"
+        savefig(p3, fname3)
+        println("  Saved: $fname3")
     end
 
     println("\n" * "="^70)
