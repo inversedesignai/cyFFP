@@ -120,10 +120,12 @@ FD-verified to 1e-7 at N_cells up to 1667. Steps 5+4 (Graf+propagation) and Step
 
 | R (μm) | M_max | Forward | Zygote (fwd+adj) | Ratio |
 |--------|-------|---------|-------------------|-------|
-| 1000 | 6303 | 19s | 22s | 1.16× |
-| 2000 | 12587 | 74s | 80s | **1.08×** |
+| 1000 | 6303 | 4.8s | 7.7s | 1.61× |
+| 2000 | 12587 | 14.3s | 23.5s | **1.65×** |
 
-The adjoint adds only **6s** to the 74s forward at full production scale. 100 L-BFGS iterations: **~2.2 hours**.
+The adjoint adds only **~65%** overhead to the forward. 100 L-BFGS iterations: **~39 minutes**.
+
+**Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
 
 **Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
 

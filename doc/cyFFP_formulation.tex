@@ -1682,13 +1682,13 @@ the loss function composition (indexing, arithmetic, etc.)\ outside the PSF
 computation.
 
 \paragraph{Scaling.}
-After fixing a Julia closure-boxing issue (v1.3), the adjoint is
-significantly faster than the forward: at production scale
-($M_{\max} \approx 12\,600$, 350 threads), the forward takes
-${\sim}74$\,s while the adjoint takes only ${\sim}6$\,s.
-The Zygote gradient ratio is $1.08\times$ --- the adjoint adds
-only $8\%$ overhead.  Total per-iteration cost: ${\sim}80$\,s.
-For 100 iterations: ${\sim}2.2$ hours.
+After fixing a Julia closure-boxing issue (v1.3) and fusing the
+forward propagation$+$Graf shift (eliminating the 53\,GB
+$\tilde a$ intermediate), the forward takes ${\sim}14$\,s and
+the Zygote gradient (forward$+$adjoint) takes ${\sim}24$\,s at
+production scale ($M_{\max} \approx 12\,600$, 350 threads).
+The gradient ratio is a stable ${\sim}1.65\times$ across all scales.
+For 100 iterations: ${\sim}39$ minutes.
 
 \paragraph{Closure-boxing pitfall.}
 Writing \texttt{var = nothing} after a \texttt{@threads} loop in the
@@ -1816,28 +1816,20 @@ Each L-BFGS iteration requires one forward + backward evaluation:
 \textbf{Component} & \textbf{1 thread} & \textbf{388 threads} \\
 \midrule
 \texttt{prepare\_psf} (once) & ${\sim}44$\,s & ${\sim}44$\,s \\
-Forward (\texttt{psf\_intensity}) & --- & ${\sim}74$\,s \\
-Backward (\texttt{psf\_adjoint}) & --- & ${\sim}6$\,s \\
+Forward (\texttt{psf\_intensity}) & --- & ${\sim}14$\,s \\
+Backward (\texttt{psf\_adjoint}) & --- & ${\sim}9$\,s \\
 L-BFGS update & $< 0.1$\,s & $< 0.1$\,s \\
 \midrule
-\textbf{Total per iteration} & & ${\sim}\mathbf{80}$\,s \\
+\textbf{Total per iteration} & & ${\sim}\mathbf{24}$\,s \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-For 100 iterations of a 2\,mm lens at $\alpha = 30^\circ$: ${\sim}2.2$ hours
-on a 350-thread machine.  The adjoint adds only ${\sim}8\%$ overhead to the
-forward --- the Zygote gradient ratio is $1.08\times$ at production scale.
-The surrogate model evaluation is negligible ($< 1$\,ms for the mock model).
-
-\noindent
-\textbf{Note:} the adjoint (${\sim}6$\,s) is much faster than the forward
-(${\sim}74$\,s) because the forward is dominated by FFTLog (${\sim}42$\,s)
-and propagation (${\sim}15$\,s), while the adjoint's fused Steps~5+4 (Graf
-+ propagation, ${\sim}5$\,s) and Steps~3+2 (FFTLog + modes, ${\sim}3$\,s)
-are highly efficient due to @simd scatter patterns, Bessel truncation, and
-the elimination of the 53\,GB $\overline{\tilde a}$ intermediate.
+For 100 iterations of a 2\,mm lens at $\alpha = 30^\circ$: ${\sim}39$ minutes
+on a 350-thread machine.  The Zygote gradient ratio is a stable
+${\sim}1.65\times$ across all scales.  The surrogate model evaluation is
+negligible ($< 1$\,ms for the mock model).
 
 
 %=======================================================================
