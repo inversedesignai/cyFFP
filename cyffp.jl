@@ -132,15 +132,13 @@ struct _FFTLogWorkspace
     pifft!::Any                  # in-place IFFT plan (MEASURE)
 end
 
-function _make_workspace(N::Int, dln::Float64)
+function _make_workspace(N::Int, dln::Float64; flags=FFTW.MEASURE)
     buf  = zeros(ComplexF64, N)
     U_c  = zeros(ComplexF64, N)
     n_idx = [n <= (N-1)÷2 ? n : n - N for n in 0:N-1]
     q    = @. (2π / (N * dln)) * n_idx
-    # FFTW.MEASURE benchmarks several FFT algorithms and picks the fastest.
-    # Plan creation is slower (~1s) but each FFT execution is 20-50% faster.
-    pfft!  = plan_fft!(buf; flags=FFTW.MEASURE)
-    pifft! = plan_ifft!(buf; flags=FFTW.MEASURE)
+    pfft!  = plan_fft!(buf; flags=flags)
+    pifft! = plan_ifft!(buf; flags=flags)
     return _FFTLogWorkspace(N, buf, U_c, q, pfft!, pifft!)
 end
 
@@ -1489,13 +1487,14 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
     end
 
     # ── Step 2: FFTLog with plan.kernels + fresh FFTW workspaces ──
-    # Reuses precomputed kernels from plan (saves ~36s Γ-recurrence)
-    # but creates fresh FFTW workspaces for NUMA affinity (plans on
-    # the correct NUMA node for the executing threads).
+    # Reuses precomputed kernels from plan (saves ~36s Γ-recurrence).
+    # Fresh workspaces with ESTIMATE (not MEASURE) — FFTW wisdom is
+    # already cached from prepare_psf, so ESTIMATE is equally fast
+    # but avoids the ~4s planning overhead on first call.
     a_m = zeros(ComplexF64, Nr, M_max + 1)
     timings["step2"] = @elapsed begin
         nt_s2 = _nworkspaces()
-        ws_s2 = [_make_workspace(Nr, dln) for _ in 1:nt_s2]
+        ws_s2 = [_make_workspace(Nr, dln; flags=FFTW.ESTIMATE) for _ in 1:nt_s2]
         g_s2  = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt_s2]
 
         Threads.@threads for idx in 1:M_max+1
@@ -1555,20 +1554,29 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
             end
 
             # B_l = Σ_m ã_{m+l} J_m  where ã_n is computed on the fly from a_m
+            # Split into n>=0 and n<0 ranges for branch-free @simd.
             @inbounds for (li, l) in enumerate(-L_max:L_max)
                 acc = zero(ComplexF64)
                 m_lo = max(-m_cut, -M_max - l)
                 m_hi = min( m_cut,  M_max - l)
-                @simd for m in m_lo:m_hi
-                    n = m + l   # mode index in a_tilde
-                    n_abs = abs(n)
-                    # ã_n = a_m[:,|n|+1] * prop * ((-1)^|n| if n < 0)
-                    a_n = a_m[ikr, n_abs + 1] * pv
-                    if n < 0 && isodd(n_abs)
-                        a_n = -a_n
-                    end
-                    acc += a_n * Jw[m + m_cut + 1]
+
+                # Range where n = m+l >= 0: m >= -l
+                # ã_n = a_m[ikr, n+1] * prop  (no sign flip)
+                m_split = max(m_lo, -l)
+                @simd for m in m_split:m_hi
+                    acc += a_m[ikr, m + l + 1] * pv * Jw[m + m_cut + 1]
                 end
+
+                # Range where n = m+l < 0: m < -l
+                # ã_n = (-1)^|n| * a_m[ikr, |n|+1] * prop
+                # |n| = -(m+l) = -m-l.  Sign = (-1)^(-m-l) = (-1)^(m+l)
+                # since (-1)^(-k) = (-1)^k for integer k.
+                @simd for m in m_lo:min(m_hi, -l - 1)
+                    n_abs = -m - l
+                    sign_n = 1 - 2 * (n_abs & 1)   # (-1)^n_abs, branch-free
+                    acc += sign_n * a_m[ikr, n_abs + 1] * pv * Jw[m + m_cut + 1]
+                end
+
                 B[ikr, li] = acc
             end
         end
