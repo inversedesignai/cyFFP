@@ -26,6 +26,7 @@ export angular_decompose, fftlog_hankel,
        compute_scalar_coeffs, neumann_shift_coeffs, propagate_scalar,
        graf_shift, inverse_hankel, angular_synthesis,
        compute_psf, prepare_psf, execute_psf, psf_adjoint,
+       execute_psf_doublet, psf_adjoint_doublet,
        psf_intensity
 
 # ═══════════════════════════════════════════════════════════════
@@ -2038,6 +2039,525 @@ function psf_adjoint(plan::PSFPlan,
             "s3+2=$(round(adj_timings["s3_2_fused"], digits=1)))")
 
     return dL_dt
+end
+
+
+# ═══════════════════════════════════════════════════════════════
+# Doublet PSF: two rotationally symmetric metasurfaces t₁(r), t₂(r)
+# separated by distance d.
+#
+# The pipeline inserts extra steps between the singlet's Step 2
+# (FFTLog) and Steps 3+4 (propagation+Graf):
+#
+#   Step 1:   u_m = i^m t₁(r) J_m(kₓr)           (mode construction)
+#   Step 2:   a_m = H_m[r u_m] / kr               (forward Hankel)
+#   Step 2a:  a_m *= exp(ikz d)                    (propagate to surface 2)
+#   Step 2b:  u_mid = H_m⁻¹[kr a_m] / ρ           (inverse Hankel → spatial)
+#   Step 2c:  u_2 = t₂(r) · u_mid                 (multiply by surface 2)
+#   Step 2d:  a_m_2 = H_m[r u_2] / kr             (forward Hankel)
+#   Steps 3+4: propagate by (f−d) + Graf shift     (same as singlet)
+#   Steps 5-8: inverse Hankel, synthesis, |u|², Cartesian interp
+#
+# Steps 1–2d are fused per-mode (one mode at a time, threaded).
+# u_m_mid is saved for the adjoint (needed for ∂L/∂t₂).
+# ═══════════════════════════════════════════════════════════════
+
+"""
+    execute_psf_doublet(plan, t1_vals, t2_vals; d_um) -> NamedTuple
+
+Compute the PSF for a metalens doublet: two rotationally symmetric
+phase profiles `t1_vals`, `t2_vals` (each length `N_cells`, |t|=1)
+separated by distance `d_um` (μm).
+
+Uses the same `PSFPlan` as `execute_psf`.  The extra steps (2a–2d)
+are fused per-mode and threaded.
+"""
+function execute_psf_doublet(plan::PSFPlan,
+                              t1_vals::Vector{ComplexF64},
+                              t2_vals::Vector{ComplexF64};
+                              d_um::Float64)
+    @assert length(t1_vals) == plan.N_cells "Expected $(plan.N_cells) cells for t1"
+    @assert length(t2_vals) == plan.N_cells "Expected $(plan.N_cells) cells for t2"
+
+    Nr    = plan.Nr
+    M_max = plan.M_max
+    m_pos = plan.m_pos
+    dln   = plan.dln
+    kr    = plan.kr
+    r_log = plan.r_log
+
+    timings = Dict{String,Float64}()
+
+    # ── Resample t1 and t2 to log grid ──
+    t1_log = zeros(ComplexF64, Nr)
+    t2_log = zeros(ComplexF64, Nr)
+    @inbounds for j in 1:Nr
+        ic = plan.cell_idx[j]
+        if ic > 0
+            t1_log[j] = t1_vals[ic]
+            t2_log[j] = t2_vals[ic]
+        end
+    end
+
+    # ── Propagation phases ──
+    kz_vals = @. sqrt(complex(plan.k^2 - kr.^2))
+    prop_d   = @. ifelse(kr < plan.k, exp(im * real(kz_vals) * d_um), zero(ComplexF64))
+    prop_f_d = @. ifelse(kr < plan.k, exp(im * real(kz_vals) * (plan.f_val - d_um)), zero(ComplexF64))
+
+    # Output ρ-grid (same as r-grid by FFTLog self-reciprocity)
+    rho = exp.(log(1.0 / kr[end]) .+ dln .* (0:Nr-1))
+
+    # ── Fused Steps 1–2d: per-mode ──
+    u_m_mid = zeros(ComplexF64, Nr, M_max + 1)   # saved for adjoint
+    a_m_2   = zeros(ComplexF64, Nr, M_max + 1)
+
+    timings["steps1_2d"] = @elapsed begin
+        nt = _nworkspaces()
+        ws_pool = [_make_workspace(Nr, dln; flags=FFTW.ESTIMATE) for _ in 1:nt]
+        g_pool  = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+
+        Threads.@threads for idx in 1:M_max+1
+            tid = Threads.threadid()
+            ws  = ws_pool[tid]
+            g   = g_pool[tid]
+            m   = m_pos[idx]
+            m_abs    = abs(m)
+            neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
+            imf = plan.im_factors[idx]
+
+            # Step 1+2: mode construction + forward Hankel
+            #   g = r · i^m · t₁ · J_m → FFTLog → raw1
+            @inbounds for j in 1:Nr
+                g[j] = r_log[j] * imf * t1_log[j] * plan.Jm[j, idx]
+            end
+            _fftlog_with_kernel!(view(a_m_2, :, idx), ws, g,
+                                  view(plan.kernels, :, m_abs + 1), neg_sign)
+            # a_m_2 holds raw1.  Skip /kr — it cancels with *kr in step 2b.
+
+            # Steps 2a+2b fused: propagate + inverse Hankel
+            #   Inverse HT input = kr·a_prop = kr·(raw1/kr)·prop_d = raw1·prop_d
+            @inbounds for j in 1:Nr
+                g[j] = a_m_2[j, idx] * prop_d[j]
+            end
+            _fftlog_with_kernel!(view(a_m_2, :, idx), ws, g,
+                                  view(plan.kernels, :, m_abs + 1), neg_sign)
+            # a_m_2 holds raw2.  u_mid = raw2/ρ.
+
+            # Steps 2c+2d fused: save u_mid, multiply t₂, forward Hankel
+            #   Forward HT input = r·t₂·u_mid = r·t₂·raw2/ρ = t₂·raw2 (since ρ=r)
+            @inbounds for j in 1:Nr
+                u_m_mid[j, idx] = a_m_2[j, idx] / rho[j]  # save for adjoint
+                g[j] = t2_log[j] * a_m_2[j, idx]           # t₂·raw2 = r·u₂
+            end
+            _fftlog_with_kernel!(view(a_m_2, :, idx), ws, g,
+                                  view(plan.kernels, :, m_abs + 1), neg_sign)
+            @inbounds for j in 1:Nr; a_m_2[j, idx] /= kr[j]; end  # final /kr for steps 3+4
+        end
+    end
+    GC.gc()
+
+    # ── Steps 3+4 fused: propagation by (f−d) + Graf shift ──
+    L_max = plan.L_max
+    Nl    = 2L_max + 1
+    B     = zeros(ComplexF64, Nr, Nl)
+
+    nt_g = _nworkspaces()
+    jp_g = [Vector{Float64}(undef, M_max + 21) for _ in 1:nt_g]
+    jw_g = [Vector{Float64}(undef, 2M_max + 1) for _ in 1:nt_g]
+
+    timings["step3_4"] = @elapsed begin
+        Threads.@threads for ikr in 1:Nr
+            kr[ikr] > plan.k && continue
+
+            tid   = Threads.threadid()
+            kr_x0 = kr[ikr] * plan.x0
+            m_cut = min(M_max, ceil(Int, abs(kr_x0)) + 20)
+            pv    = prop_f_d[ikr]
+
+            _besselj_range!(jp_g[tid], m_cut, kr_x0)
+            Jw = jw_g[tid]
+            @inbounds for d in 0:m_cut
+                Jw[d + m_cut + 1] = jp_g[tid][d + 1]
+                Jw[-d + m_cut + 1] = iseven(d) ? jp_g[tid][d + 1] : -jp_g[tid][d + 1]
+            end
+
+            @inbounds for (li, l) in enumerate(-L_max:L_max)
+                acc = zero(ComplexF64)
+                m_lo = max(-m_cut, -M_max - l)
+                m_hi = min( m_cut,  M_max - l)
+
+                m_split = max(m_lo, -l)
+                @simd for m in m_split:m_hi
+                    acc += a_m_2[ikr, m + l + 1] * pv * Jw[m + m_cut + 1]
+                end
+
+                @simd for m in m_lo:min(m_hi, -l - 1)
+                    n_abs = -m - l
+                    sign_n = 1 - 2 * (n_abs & 1)
+                    acc += sign_n * a_m_2[ikr, n_abs + 1] * pv * Jw[m + m_cut + 1]
+                end
+
+                B[ikr, li] = acc
+            end
+        end
+    end
+    GC.gc()
+
+    # ── Step 5: inverse Hankel ──
+    timings["step5"] = @elapsed begin
+        b, rho_out = inverse_hankel(B, plan.L_max, plan.kr)
+    end
+
+    # ── Step 6: angular synthesis ──
+    timings["step6"] = @elapsed begin
+        u_psf, psi = angular_synthesis(b, plan.L_max, plan.N_psi)
+    end
+
+    I_polar = abs2.(u_psf)
+
+    # ── Cartesian interpolation ──
+    hw  = plan.psf_half_width_um
+    Nxy = plan.Nxy
+    x_um = collect(range(-hw, hw, length=Nxy))
+    y_um = collect(range(-hw, hw, length=Nxy))
+    I_cart = zeros(Float64, Nxy, Nxy)
+    dpsi   = psi[2] - psi[1]
+
+    timings["interp"] = @elapsed begin
+        @inbounds for ix in 1:Nxy, iy in 1:Nxy
+            xv = x_um[ix]; yv = y_um[iy]
+            rv = sqrt(xv^2 + yv^2)
+            (rv < rho_out[1] || rv > rho_out[end]) && continue
+
+            pv = atan(yv, xv); pv < 0 && (pv += 2π)
+            lr = log(rv); lr0 = log(rho_out[1])
+            idx_r = (lr - lr0) / dln + 1.0
+            j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+            idx_p = pv / dpsi + 1.0
+            p0 = clamp(floor(Int, idx_p), 1, plan.N_psi)
+            p1 = p0 == plan.N_psi ? 1 : p0 + 1; wp = idx_p - p0
+
+            I_cart[iy, ix] = (
+                (1-wr)*(1-wp)*I_polar[j0, p0]  + wr*(1-wp)*I_polar[j0+1, p0] +
+                (1-wr)*wp    *I_polar[j0, p1]   + wr*wp    *I_polar[j0+1, p1]
+            )
+        end
+    end
+
+    I_raw  = copy(I_cart)
+    I_peak = maximum(I_cart)
+    I_peak > 0 && (I_cart ./= I_peak)
+
+    peak_idx = argmax(I_raw)
+    peak_x   = x_um[peak_idx[2]]
+    peak_y   = y_um[peak_idx[1]]
+
+    t_total = sum(values(timings))
+    println("execute_psf_doublet: $(round(t_total, digits=1))s  " *
+            "(s1-2d=$(round(timings["steps1_2d"], digits=1))  " *
+            "prop+graf=$(round(timings["step3_4"], digits=1))  " *
+            "invHT=$(round(timings["step5"], digits=1))  " *
+            "synth=$(round(timings["step6"], digits=1)))")
+
+    return (
+        I          = I_cart,
+        I_raw      = I_raw,
+        x_um       = x_um,
+        y_um       = y_um,
+        rho_airy_um = plan.rho_airy,
+        peak_rho_um = sqrt(peak_x^2 + peak_y^2),
+        peak_xy_um  = (peak_x, peak_y),
+        R_um        = plan.N_cells * plan.pitch_um,
+        lambda_um   = plan.lambda_um,
+        f_um        = plan.f_val,
+        M_max       = plan.M_max,
+        Nr          = plan.Nr,
+        timings     = timings,
+        _u_psf      = u_psf,
+        _I_polar    = I_polar,
+        _rho        = rho_out,
+        _psi        = psi,
+        _u_m_mid    = u_m_mid,   # saved for doublet adjoint
+        _t2_log     = t2_log,    # saved for doublet adjoint
+        _d_um       = d_um,      # saved for doublet adjoint
+    )
+end
+
+
+"""
+    psf_adjoint_doublet(plan, t1_vals, t2_vals, result, dL_dI_raw) -> (dL_dt1, dL_dt2)
+
+Adjoint of `execute_psf_doublet`.  Returns gradients w.r.t. both
+transmission profiles.
+"""
+function psf_adjoint_doublet(plan::PSFPlan,
+                              t1_vals::Vector{ComplexF64},
+                              t2_vals::Vector{ComplexF64},
+                              result::NamedTuple,
+                              dL_dI_raw::Matrix{Float64})
+
+    Nr    = plan.Nr
+    M_max = plan.M_max
+    m_pos = plan.m_pos
+    dln   = plan.dln
+    N_psi = plan.N_psi
+    L_max = plan.L_max
+    Nxy   = plan.Nxy
+    kr    = plan.kr
+    r_log = plan.r_log
+
+    u_psf   = result._u_psf
+    I_polar = result._I_polar
+    rho     = result._rho
+    psi     = result._psi
+    u_m_mid = result._u_m_mid
+    t2_log  = result._t2_log
+    d_um    = result._d_um
+
+    hw   = plan.psf_half_width_um
+    x_um = collect(range(-hw, hw, length=Nxy))
+    y_um = collect(range(-hw, hw, length=Nxy))
+    dpsi = psi[2] - psi[1]
+
+    adj_timings = Dict{String,Float64}()
+    _t0 = time()
+
+    # ─── Step 9 adjoint: Cartesian interp (scatter) ───────────
+    I_polar_bar = zeros(Float64, Nr, N_psi)
+    @inbounds for ix in 1:Nxy, iy in 1:Nxy
+        xv = x_um[ix]; yv = y_um[iy]
+        rv = sqrt(xv^2 + yv^2)
+        (rv < rho[1] || rv > rho[end]) && continue
+
+        pv = atan(yv, xv); pv < 0 && (pv += 2π)
+        lr = log(rv); lr0 = log(rho[1])
+        idx_r = (lr - lr0) / dln + 1.0
+        j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+        idx_p = pv / dpsi + 1.0
+        p0 = clamp(floor(Int, idx_p), 1, N_psi)
+        p1 = p0 == N_psi ? 1 : p0 + 1; wp = idx_p - p0
+
+        dv = dL_dI_raw[iy, ix]
+        I_polar_bar[j0,   p0] += (1-wr)*(1-wp)*dv
+        I_polar_bar[j0+1, p0] += wr*(1-wp)*dv
+        I_polar_bar[j0,   p1] += (1-wr)*wp*dv
+        I_polar_bar[j0+1, p1] += wr*wp*dv
+    end
+
+    # ─── Step 8 adjoint: |u|² → u_bar = I_polar_bar * u_psf ──
+    u_bar = zeros(ComplexF64, Nr, N_psi)
+    @inbounds for ip in 1:N_psi, ir in 1:Nr
+        u_bar[ir, ip] = I_polar_bar[ir, ip] * u_psf[ir, ip]
+    end
+
+    # ─── Step 7 adjoint: angular synthesis transpose (fft) ────
+    b_fft = fft(u_bar, 2)
+    Nl = 2L_max + 1
+    b_bar = zeros(ComplexF64, Nr, Nl)
+    @inbounds for ir in 1:Nr
+        for l in 0:L_max
+            b_bar[ir, l + L_max + 1] = b_fft[ir, l + 1]
+        end
+        for l in -L_max:-1
+            b_bar[ir, l + L_max + 1] = b_fft[ir, N_psi + l + 1]
+        end
+    end
+
+    adj_timings["s9_8_7"] = time() - _t0; _t0 = time()
+
+    # ─── Step 6 adjoint: inverse Hankel transpose ─────────────
+    n_idx_l = [n <= (Nr-1)÷2 ? n : n - Nr for n in 0:Nr-1]
+    q_l     = @. (2π / (Nr * dln)) * n_idx_l
+    kernels_l = _precompute_kernels(q_l, collect(0:L_max))
+
+    nt_adj_l = _nworkspaces()
+    ws_adj_l  = [_make_workspace(Nr, dln; flags=FFTW.ESTIMATE) for _ in 1:nt_adj_l]
+    raw_adj_l = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt_adj_l]
+    f_adj_l   = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt_adj_l]
+
+    B_bar = zeros(ComplexF64, Nr, Nl)
+
+    Threads.@threads for li in 1:Nl
+        tid = Threads.threadid()
+        ws  = ws_adj_l[tid]
+        raw_bar = raw_adj_l[tid]
+        f_bar   = f_adj_l[tid]
+        l     = li - L_max - 1
+        l_abs = abs(l)
+        neg_sign = (l < 0 && isodd(l_abs)) ? -1 : 1
+
+        @inbounds for j in 1:Nr
+            raw_bar[j] = b_bar[j, li] / rho[j]
+        end
+        _adjoint_fftlog!(f_bar, ws, raw_bar,
+                          view(kernels_l, :, l_abs + 1), neg_sign)
+        @inbounds for j in 1:Nr
+            B_bar[j, li] = kr[j] * f_bar[j]
+        end
+    end
+
+    adj_timings["s6_invHT"] = time() - _t0; _t0 = time()
+
+    # ─── Steps 5+4 fused adjoint: Graf shift + propagation by (f−d) ──
+    kz_vals   = @. sqrt(complex(plan.k^2 - kr.^2))
+    prop_conj = @. ifelse(kr < plan.k, exp(-im * real(kz_vals) * (plan.f_val - d_um)), zero(ComplexF64))
+
+    nt_adj = _nworkspaces()
+    a_m_2_bar = zeros(ComplexF64, Nr, M_max + 1)
+
+    pos_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
+    neg_bufs = [zeros(ComplexF64, M_max + 1) for _ in 1:nt_adj]
+    jw_bufs  = [Vector{Float64}(undef, 2(M_max + L_max) + 1) for _ in 1:nt_adj]
+    jp_bufs  = [Vector{Float64}(undef, M_max + L_max + 21) for _ in 1:nt_adj]
+
+    Threads.@threads for ikr in 1:Nr
+        kr[ikr] > plan.k && continue
+
+        tid = Threads.threadid()
+        buf_pos = pos_bufs[tid]; buf_neg = neg_bufs[tid]
+        Jw = jw_bufs[tid]; Jp_buf = jp_bufs[tid]
+
+        kr_x0 = kr[ikr] * plan.x0
+        n_cut = min(M_max + L_max, ceil(Int, abs(kr_x0)) + 20)
+        pc = prop_conj[ikr]
+
+        _besselj_range!(Jp_buf, n_cut, kr_x0)
+        Jp = view(Jp_buf, 1:n_cut+1)
+        @inbounds for d in 0:n_cut
+            Jw[d + n_cut + 1] = Jp[d + 1]
+            Jw[-d + n_cut + 1] = iseven(d) ? Jp[d + 1] : -Jp[d + 1]
+        end
+
+        m_eff = min(M_max, n_cut + L_max)
+
+        @inbounds for m in 0:m_eff
+            buf_pos[m + 1] = zero(ComplexF64)
+            buf_neg[m + 1] = zero(ComplexF64)
+        end
+
+        @inbounds for (li, l) in enumerate(-L_max:L_max)
+            bl = B_bar[ikr, li]
+            m_lo_p = max(0, l - n_cut); m_hi_p = min(m_eff, l + n_cut)
+            @simd for m in m_lo_p:m_hi_p
+                buf_pos[m + 1] += bl * Jw[m - l + n_cut + 1]
+            end
+            m_lo_n = max(0, -l - n_cut); m_hi_n = min(m_eff, -l + n_cut)
+            @simd for m in m_lo_n:m_hi_n
+                buf_neg[m + 1] += bl * Jw[-m - l + n_cut + 1]
+            end
+        end
+
+        @inbounds begin
+            a_m_2_bar[ikr, 1] = pc * buf_pos[1]
+            for m in 1:m_eff
+                s = iseven(m) ? 1 : -1
+                a_m_2_bar[ikr, m + 1] = pc * (buf_pos[m + 1] + s * buf_neg[m + 1])
+            end
+        end
+    end
+
+    GC.gc()
+    adj_timings["s5_4_graf_prop"] = time() - _t0; _t0 = time()
+
+    # ─── Steps 2d–1 fused adjoint: per-mode backprop ─────────
+    # For each mode m, backprop:
+    #   2d adj: a_m_2_bar → adjoint forward Hankel → u_2_bar
+    #   2c adj: u_mid_bar = conj(t₂) · u_2_bar,  dt₂_bar += conj(u_mid) · u_2_bar
+    #   2b adj: u_mid_bar → adjoint inverse Hankel → a_prop_bar
+    #   2a adj: a_bar = a_prop_bar · conj(exp(ikz d))
+    #   2  adj: a_bar → adjoint forward Hankel → g_bar → u_m_bar = r · g_bar
+    #   1  adj: dt₁_bar += conj(i^m · J_m) · u_m_bar
+    prop_d_conj = @. ifelse(kr < plan.k, exp(-im * real(kz_vals) * d_um), zero(ComplexF64))
+    conj_im = [conj(plan.im_factors[idx]) for idx in 1:M_max+1]
+
+    nt = _nworkspaces()
+    ws_adj   = [_make_workspace(Nr, dln; flags=FFTW.ESTIMATE) for _ in 1:nt]
+    raw_bufs = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    g_bufs   = [Vector{ComplexF64}(undef, Nr) for _ in 1:nt]
+    t1_bar_locals = [zeros(ComplexF64, Nr) for _ in 1:nt]
+    t2_bar_locals = [zeros(ComplexF64, Nr) for _ in 1:nt]
+
+    Threads.@threads for idx in 1:M_max+1
+        tid = Threads.threadid()
+        ws  = ws_adj[tid]
+        raw_bar = raw_bufs[tid]
+        g_bar   = g_bufs[tid]
+        t1_local = t1_bar_locals[tid]
+        t2_local = t2_bar_locals[tid]
+
+        m   = m_pos[idx]
+        m_abs    = abs(m)
+        neg_sign = (m < 0 && isodd(m_abs)) ? -1 : 1
+
+        # ── Step 2d adjoint: forward Hankel adjoint ──
+        # Forward: g = r·u₂ → FFTLog → a_m_2 = raw/kr
+        # Adjoint: raw_bar = a_m_2_bar/kr → adj_FFTLog → g_bar
+        @inbounds for j in 1:Nr
+            raw_bar[j] = a_m_2_bar[j, idx] / kr[j]
+        end
+        _adjoint_fftlog!(g_bar, ws, raw_bar,
+                          view(plan.kernels, :, m_abs + 1), neg_sign)
+
+        # ── Step 2c adjoint + step 2b prep ──
+        # u_2_bar = r·g_bar.  Accumulate dt₂_bar.
+        # u_mid_bar = conj(t₂)·u_2_bar.
+        # Inverse HT adj input = u_mid_bar/ρ = conj(t₂)·r·g_bar/ρ = conj(t₂)·g_bar  (ρ=r)
+        @inbounds for j in 1:Nr
+            u2_bar_j = r_log[j] * g_bar[j]
+            t2_local[j] += conj(u_m_mid[j, idx]) * u2_bar_j
+            raw_bar[j] = conj(t2_log[j]) * g_bar[j]  # skip *r/ρ since ρ=r
+        end
+
+        # ── Steps 2b+2a+2 fused adjoint ──
+        # adj_FFTLog → f_bar.  a_prop_bar = kr·f_bar.
+        # a_bar = kr·f_bar·prop_d_conj.  raw_bar = a_bar/kr = f_bar·prop_d_conj.
+        # (kr cancels)
+        _adjoint_fftlog!(g_bar, ws, raw_bar,
+                          view(plan.kernels, :, m_abs + 1), neg_sign)
+        @inbounds for j in 1:Nr
+            raw_bar[j] = g_bar[j] * prop_d_conj[j]  # kr/kr cancels
+        end
+
+        # ── Step 2+1 adjoint: FFTLog adj + mode construction ──
+        _adjoint_fftlog!(g_bar, ws, raw_bar,
+                          view(plan.kernels, :, m_abs + 1), neg_sign)
+        cim = conj_im[idx]
+        @inbounds for j in 1:Nr
+            t1_local[j] += cim * plan.Jm[j, idx] * r_log[j] * g_bar[j]
+        end
+    end
+
+    GC.gc()
+    adj_timings["s2d_1_fused"] = time() - _t0; _t0 = time()
+
+    # ── Reduce per-thread accumulators ──
+    t1_log_bar = t1_bar_locals[1]
+    t2_log_bar = t2_bar_locals[1]
+    for t in 2:nt
+        t1_log_bar .+= t1_bar_locals[t]
+        t2_log_bar .+= t2_bar_locals[t]
+    end
+
+    # ── Step 0 adjoint: resample scatter-add ──
+    dL_dt1 = zeros(ComplexF64, plan.N_cells)
+    dL_dt2 = zeros(ComplexF64, plan.N_cells)
+    @inbounds for j in 1:Nr
+        ic = plan.cell_idx[j]
+        if ic > 0
+            dL_dt1[ic] += t1_log_bar[j]
+            dL_dt2[ic] += t2_log_bar[j]
+        end
+    end
+
+    adj_timings["s0_resample"] = time() - _t0
+
+    println("psf_adjoint_doublet: $(round(sum(values(adj_timings)), digits=1))s  " *
+            "(s9-7=$(round(adj_timings["s9_8_7"], digits=1))  " *
+            "s6=$(round(adj_timings["s6_invHT"], digits=1))  " *
+            "s5+4=$(round(adj_timings["s5_4_graf_prop"], digits=1))  " *
+            "s2d-1=$(round(adj_timings["s2d_1_fused"], digits=1)))")
+
+    return dL_dt1, dL_dt2
 end
 
 
