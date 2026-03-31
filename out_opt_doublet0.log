@@ -1,0 +1,648 @@
+═══ Doublet PSF optimization (R=1 mm, α=30°, NA=0.4) ═══
+N_cells = 3333,  Nxy = 201,  threads = 350
+
+prepare_psf ... prepare_psf: R=999.9μm, α=30.0°, M_max=6303, Nr=65536
+  Precomputing J_m(kₓr) matrix [65536 × 6304]...
+    0.3s, 3.3 GB
+  Precomputing FFTLog kernels...
+    9.2s, 6.6 GB
+  Creating FFTW MEASURE plans (351 threads)...
+    2.8s
+  Total precomputed: 9.9 GB
+done  (13.8 s,  M_max = 6303,  Nr = 65536)
+
+Mask: circle r≤20 px (ρ_Airy = 0.8627 μm, dx = 0.0431 μm), 1257 pixels
+Pixel size = 0.0431 μm,  P_near = πR² = 3.1410e+06 μm²
+Output directory: opt_doublet_results
+
+d = 500.0 μm
+Surface 1: ideal lens
+Surface 2: ideal lens
+Starting CCSA optimization (maxeval=200) ...
+
+execute_psf_doublet: 2.4s  (s1-2d=1.1  prop+graf=0.7  invHT=0.6  synth=0.0)
+psf_adjoint_doublet: 3.7s  (s9-7=0.1  s6=0.5  s5+4=2.1  s2d-1=0.9)
+iter    1:  η = 0.000002
+  → saved snapshot
+execute_psf_doublet: 1.9s  (s1-2d=0.6  prop+graf=0.8  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.2s  (s9-7=0.0  s6=0.5  s5+4=1.7  s2d-1=0.9)
+iter    2:  η = 0.000002
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.2s  (s9-7=0.1  s6=0.6  s5+4=1.7  s2d-1=0.9)
+iter    3:  η = 0.000002
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.4s  (s9-7=0.0  s6=0.4  s5+4=2.1  s2d-1=0.8)
+iter    4:  η = 0.000002
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.8  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.8s  (s9-7=0.0  s6=0.5  s5+4=1.7  s2d-1=1.5)
+iter    5:  η = 0.000002
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.8  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter    6:  η = 0.000002
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.5s  (s9-7=0.0  s6=0.5  s5+4=1.8  s2d-1=1.1)
+iter    7:  η = 0.000011
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter    8:  η = 0.000116
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.7  s2d-1=0.6)
+iter    9:  η = 0.001529
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.5s  (s9-7=0.0  s6=0.5  s5+4=1.9  s2d-1=1.0)
+iter   10:  η = 0.000650
+  → saved snapshot
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.9s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=1.8)
+iter   11:  η = 0.002851
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.6  s5+4=1.6  s2d-1=0.5)
+iter   12:  η = 0.003625
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.8  s2d-1=0.5)
+iter   13:  η = 0.006987
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=0.7)
+iter   14:  η = 0.000329
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.4s  (s9-7=0.1  s6=0.5  s5+4=1.7  s2d-1=1.1)
+iter   15:  η = 0.006658
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.3s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=2.3)
+iter   16:  η = 0.008457
+execute_psf_doublet: 1.8s  (s1-2d=0.5  prop+graf=0.8  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter   17:  η = 0.010771
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   18:  η = 0.014350
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   19:  η = 0.018941
+execute_psf_doublet: 1.7s  (s1-2d=0.4  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.8)
+iter   20:  η = 0.023720
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.2s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=1.1)
+iter   21:  η = 0.028349
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=1.0)
+iter   22:  η = 0.032884
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=0.8)
+iter   23:  η = 0.036394
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.1s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=2.0)
+iter   24:  η = 0.038809
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter   25:  η = 0.021584
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.8  s2d-1=0.6)
+iter   26:  η = 0.040274
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.8  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=2.1  s2d-1=0.6)
+iter   27:  η = 0.036198
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter   28:  η = 0.044444
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.2s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=1.1)
+iter   29:  η = 0.038676
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter   30:  η = 0.046766
+  → saved snapshot
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.1  s6=0.5  s5+4=1.6  s2d-1=0.9)
+iter   31:  η = 0.040143
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   32:  η = 0.048514
+execute_psf_doublet: 1.8s  (s1-2d=0.5  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 4.8s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=2.6)
+iter   33:  η = 0.049426
+execute_psf_doublet: 1.9s  (s1-2d=0.5  prop+graf=0.7  invHT=0.6  synth=0.1)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.5  s5+4=2.1  s2d-1=0.6)
+iter   34:  η = 0.050521
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=0.7)
+iter   35:  η = 0.035994
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   36:  η = 0.051800
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.0s  (s9-7=0.1  s6=0.5  s5+4=1.6  s2d-1=1.8)
+iter   37:  η = 0.054856
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter   38:  η = 0.055307
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.1  s6=0.4  s5+4=1.8  s2d-1=0.6)
+iter   39:  η = 0.050283
+execute_psf_doublet: 1.6s  (s1-2d=0.4  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.7  s2d-1=0.9)
+iter   40:  η = 0.055620
+  → saved snapshot
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter   41:  η = 0.054908
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.8)
+iter   42:  η = 0.056177
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.1)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter   43:  η = 0.056948
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.7s  (s9-7=0.0  s6=0.3  s5+4=1.9  s2d-1=1.4)
+iter   44:  η = 0.052684
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.8s  (s9-7=0.0  s6=0.4  s5+4=1.9  s2d-1=1.4)
+iter   45:  η = 0.055681
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter   46:  η = 0.057328
+execute_psf_doublet: 1.6s  (s1-2d=0.6  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.8s  (s9-7=0.0  s6=0.5  s5+4=2.2  s2d-1=1.1)
+iter   47:  η = 0.057435
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.1  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter   48:  η = 0.057701
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.2s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=1.1)
+iter   49:  η = 0.055820
+execute_psf_doublet: 1.6s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.7  s2d-1=0.6)
+iter   50:  η = 0.057368
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter   51:  η = 0.057973
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.1  s6=0.5  s5+4=1.6  s2d-1=0.8)
+iter   52:  η = 0.057568
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.4  s5+4=2.0  s2d-1=0.9)
+iter   53:  η = 0.058097
+execute_psf_doublet: 1.6s  (s1-2d=0.4  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.1)
+iter   54:  η = 0.054049
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.1s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=2.0)
+iter   55:  η = 0.056599
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter   56:  η = 0.058217
+execute_psf_doublet: 1.6s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 5.5s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=3.4)
+iter   57:  η = 0.058278
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.9)
+iter   58:  η = 0.058347
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter   59:  η = 0.058396
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter   60:  η = 0.058260
+  → saved snapshot
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.8)
+iter   61:  η = 0.058424
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=1.1)
+iter   62:  η = 0.058114
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter   63:  η = 0.058588
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 5.4s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=3.2)
+iter   64:  η = 0.058322
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=0.7)
+iter   65:  η = 0.058597
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.6)
+iter   66:  η = 0.058500
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=1.7)
+iter   67:  η = 0.058735
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter   68:  η = 0.059019
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.1)
+iter   69:  η = 0.054305
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   70:  η = 0.058001
+  → saved snapshot
+execute_psf_doublet: 1.6s  (s1-2d=0.4  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 3.4s  (s9-7=0.0  s6=0.4  s5+4=1.9  s2d-1=0.9)
+iter   71:  η = 0.058985
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.5s  (s9-7=0.0  s6=0.4  s5+4=1.9  s2d-1=1.1)
+iter   72:  η = 0.059102
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.9s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.9)
+iter   73:  η = 0.055955
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter   74:  η = 0.059085
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.9)
+iter   75:  η = 0.059218
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter   76:  η = 0.055097
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   77:  η = 0.059106
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=1.0)
+iter   78:  η = 0.059332
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=1.8)
+iter   79:  η = 0.055121
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter   80:  η = 0.059225
+  → saved snapshot
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.2s  (s9-7=0.0  s6=0.4  s5+4=1.8  s2d-1=0.9)
+iter   81:  η = 0.059428
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.3s  (s9-7=0.1  s6=0.4  s5+4=1.6  s2d-1=2.3)
+iter   82:  η = 0.055668
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.1  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter   83:  η = 0.059373
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.5)
+iter   84:  η = 0.059538
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.5  s5+4=1.6  s2d-1=0.9)
+iter   85:  η = 0.056822
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.4s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.4)
+iter   86:  η = 0.059617
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.5s  (s9-7=0.0  s6=0.3  s5+4=1.7  s2d-1=1.4)
+iter   87:  η = 0.058948
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.8)
+iter   88:  η = 0.059795
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.1s  (s9-7=0.0  s6=0.4  s5+4=2.0  s2d-1=1.6)
+iter   89:  η = 0.059881
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter   90:  η = 0.059918
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 4.9s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=2.8)
+iter   91:  η = 0.060089
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.8  s2d-1=0.6)
+iter   92:  η = 0.059865
+execute_psf_doublet: 1.7s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter   93:  η = 0.059974
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.8  s2d-1=0.8)
+iter   94:  η = 0.060074
+execute_psf_doublet: 1.6s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=1.0)
+iter   95:  η = 0.060181
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter   96:  η = 0.060280
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter   97:  η = 0.046807
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter   98:  η = 0.059660
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.9s  (s9-7=0.0  s6=0.3  s5+4=1.9  s2d-1=1.6)
+iter   99:  η = 0.060339
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  100:  η = 0.058152
+  → saved snapshot
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.7s  (s9-7=0.0  s6=0.3  s5+4=2.1  s2d-1=1.2)
+iter  101:  η = 0.060279
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  102:  η = 0.060374
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter  103:  η = 0.060372
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.4)
+iter  104:  η = 0.060395
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  105:  η = 0.060392
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter  106:  η = 0.060381
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 6.1s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=4.1)
+iter  107:  η = 0.060414
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.3s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.3)
+iter  108:  η = 0.060402
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter  109:  η = 0.060435
+execute_psf_doublet: 1.6s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter  110:  η = 0.060513
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.0)
+iter  111:  η = 0.058566
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.6)
+iter  112:  η = 0.060291
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  113:  η = 0.060566
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter  114:  η = 0.059010
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 4.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.7)
+iter  115:  η = 0.060662
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.0s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.0)
+iter  116:  η = 0.060801
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.1)
+iter  117:  η = 0.060354
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  118:  η = 0.060808
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  119:  η = 0.060820
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.4s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.4)
+iter  120:  η = 0.060872
+  → saved snapshot
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.0)
+iter  121:  η = 0.060986
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.3)
+iter  122:  η = 0.054624
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.6)
+iter  123:  η = 0.060905
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.2)
+iter  124:  η = 0.061034
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.9)
+iter  125:  η = 0.047496
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.1s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=2.1)
+iter  126:  η = 0.060903
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.4s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=2.4)
+iter  127:  η = 0.061070
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=0.7)
+iter  128:  η = 0.059960
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.3)
+iter  129:  η = 0.061106
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.7  s2d-1=0.7)
+iter  130:  η = 0.061030
+  → saved snapshot
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter  131:  η = 0.061133
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.7)
+iter  132:  η = 0.060852
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.9)
+iter  133:  η = 0.061155
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  134:  η = 0.061115
+execute_psf_doublet: 1.7s  (s1-2d=0.6  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.5  s2d-1=0.8)
+iter  135:  η = 0.061176
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.8)
+iter  136:  η = 0.061259
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.1  s6=0.5  s5+4=1.6  s2d-1=0.8)
+iter  137:  η = 0.044616
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.8  s2d-1=0.6)
+iter  138:  η = 0.059315
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter  139:  η = 0.061256
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.5  s2d-1=0.9)
+iter  140:  η = 0.061306
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.9  s2d-1=0.6)
+iter  141:  η = 0.061020
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.0s  (s9-7=0.0  s6=0.4  s5+4=1.7  s2d-1=1.9)
+iter  142:  η = 0.061339
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter  143:  η = 0.055409
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter  144:  η = 0.061206
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.7s  (s9-7=0.0  s6=0.3  s5+4=1.5  s2d-1=1.8)
+iter  145:  η = 0.061362
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=2.0  s2d-1=0.7)
+iter  146:  η = 0.060887
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter  147:  η = 0.061395
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.9  s2d-1=0.6)
+iter  148:  η = 0.059051
+execute_psf_doublet: 1.8s  (s1-2d=0.6  prop+graf=0.7  invHT=0.5  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.8)
+iter  149:  η = 0.061446
+execute_psf_doublet: 1.6s  (s1-2d=0.6  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.4s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=1.4)
+iter  150:  η = 0.061423
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 4.4s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.5)
+iter  151:  η = 0.061481
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.7)
+iter  152:  η = 0.060227
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.6)
+iter  153:  η = 0.061502
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  154:  η = 0.058207
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.6)
+iter  155:  η = 0.061500
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.1s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.1)
+iter  156:  η = 0.061520
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  157:  η = 0.061461
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.9)
+iter  158:  η = 0.061566
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  159:  η = 0.051394
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  160:  η = 0.061526
+  → saved snapshot
+execute_psf_doublet: 1.4s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.9)
+iter  161:  η = 0.061607
+execute_psf_doublet: 1.4s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 4.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.7)
+iter  162:  η = 0.055653
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 4.0s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.1)
+iter  163:  η = 0.061571
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  164:  η = 0.061625
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  165:  η = 0.061537
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter  166:  η = 0.061657
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.0)
+iter  167:  η = 0.053762
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.6)
+iter  168:  η = 0.061630
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  169:  η = 0.061684
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.5)
+iter  170:  η = 0.059826
+  → saved snapshot
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  171:  η = 0.061700
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.9)
+iter  172:  η = 0.061689
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.6)
+iter  173:  η = 0.061716
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  174:  η = 0.061663
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 4.0s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=2.1)
+iter  175:  η = 0.061731
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  176:  η = 0.058927
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.9  s2d-1=0.6)
+iter  177:  η = 0.061731
+execute_psf_doublet: 1.5s  (s1-2d=0.4  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  178:  η = 0.061744
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.5s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.6)
+iter  179:  η = 0.061779
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.7  s2d-1=0.7)
+iter  180:  η = 0.061786
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.6)
+iter  181:  η = 0.061837
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  182:  η = 0.054572
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.9  s2d-1=0.7)
+iter  183:  η = 0.061752
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter  184:  η = 0.061850
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  185:  η = 0.058166
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.8s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter  186:  η = 0.061793
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=1.0)
+iter  187:  η = 0.061858
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.8)
+iter  188:  η = 0.061855
+execute_psf_doublet: 1.4s  (s1-2d=0.5  prop+graf=0.6  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.9)
+iter  189:  η = 0.061878
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 4.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=2.0)
+iter  190:  η = 0.054921
+  → saved snapshot
+execute_psf_doublet: 1.5s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.7)
+iter  191:  η = 0.061832
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.6)
+iter  192:  η = 0.061895
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  193:  η = 0.059922
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.3s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=1.3)
+iter  194:  η = 0.061900
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.8  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.7s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.7)
+iter  195:  η = 0.061896
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.4  s5+4=1.6  s2d-1=0.9)
+iter  196:  η = 0.061915
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.8  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  197:  η = 0.061871
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.9s  (s9-7=0.0  s6=0.3  s5+4=1.8  s2d-1=0.6)
+iter  198:  η = 0.061923
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.4  synth=0.0)
+psf_adjoint_doublet: 2.6s  (s9-7=0.0  s6=0.3  s5+4=1.6  s2d-1=0.6)
+iter  199:  η = 0.060896
+execute_psf_doublet: 1.6s  (s1-2d=0.5  prop+graf=0.7  invHT=0.3  synth=0.0)
+psf_adjoint_doublet: 3.0s  (s9-7=0.0  s6=0.3  s5+4=1.9  s2d-1=0.7)
+iter  200:  η = 0.061904
+  → saved snapshot
+
+Optimization finished: MAXEVAL_REACHED
+Final η = 0.061923
+execute_psf_doublet: 1.6s  (s1-2d=0.6  prop+graf=0.7  invHT=0.3  synth=0.0)
+Saved to opt_doublet_results/

@@ -1,0 +1,363 @@
+═══ PSF phase optimization (R=2 mm, α=30°, NA=0.4) ═══
+N_cells = 6667,  Nxy = 201,  threads = 350
+
+prepare_psf ... prepare_psf: R=2000.1μm, α=30.0°, M_max=12587, Nr=131072
+  Precomputing J_m(kₓr) matrix [131072 × 12588]...
+    0.6s, 13.2 GB
+  Precomputing FFTLog kernels...
+    42.4s, 26.4 GB
+  Creating FFTW MEASURE plans (351 threads)...
+    4.4s
+  Total precomputed: 39.6 GB
+done  (51.1 s,  M_max = 12587,  Nr = 131072)
+
+Mask: circle r≤20 px (ρ_Airy = 0.8627 μm, dx = 0.0431 μm), 1257 pixels
+Pixel size = 0.0431 μm,  P_near = πR² = 1.2568e+07 μm²
+Output directory: opt_results
+
+Init: ideal oblique lens phase
+Starting CCSA optimization (maxeval=200) ...
+
+execute_psf: 6.8s  (modes=1.2  FFTLog=2.6  prop+graf=2.2  invHT=0.7  synth=0.1)
+psf_adjoint: 11.7s  (s9-7=0.1  s6=0.7  s5+4=8.9  s3+2=2.1)
+iter    1:  η = 0.000003
+  → saved phi & PSF snapshot
+execute_psf: 4.9s  (modes=0.3  FFTLog=1.4  prop+graf=2.4  invHT=0.7  synth=0.1)
+psf_adjoint: 8.8s  (s9-7=0.1  s6=0.8  s5+4=5.6  s3+2=2.3)
+iter    2:  η = 0.000003
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.4  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 7.6s  (s9-7=0.0  s6=0.5  s5+4=5.5  s3+2=1.6)
+iter    3:  η = 0.000003
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.4  synth=0.1)
+psf_adjoint: 7.7s  (s9-7=0.1  s6=0.8  s5+4=5.4  s3+2=1.4)
+iter    4:  η = 0.000003
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.4  invHT=0.6  synth=0.0)
+psf_adjoint: 11.6s  (s9-7=0.1  s6=0.8  s5+4=5.2  s3+2=5.5)
+iter    5:  η = 0.000003
+execute_psf: 3.8s  (modes=0.3  FFTLog=0.9  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 7.4s  (s9-7=0.0  s6=0.5  s5+4=5.5  s3+2=1.3)
+iter    6:  η = 0.000003
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 10.4s  (s9-7=0.0  s6=0.4  s5+4=5.3  s3+2=4.6)
+iter    7:  η = 0.000004
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 7.2s  (s9-7=0.1  s6=0.5  s5+4=5.1  s3+2=1.6)
+iter    8:  η = 0.000006
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 12.7s  (s9-7=0.0  s6=0.7  s5+4=5.2  s3+2=6.7)
+iter    9:  η = 0.000009
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 7.2s  (s9-7=0.0  s6=0.5  s5+4=5.4  s3+2=1.2)
+iter   10:  η = 0.000018
+  → saved phi & PSF snapshot
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 8.0s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=2.2)
+iter   11:  η = 0.000048
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.3  prop+graf=2.3  invHT=0.4  synth=0.0)
+psf_adjoint: 10.2s  (s9-7=0.1  s6=0.5  s5+4=5.4  s3+2=4.3)
+iter   12:  η = 0.000164
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.4  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=1.5)
+iter   13:  η = 0.000582
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.0  s6=0.5  s5+4=5.5  s3+2=1.3)
+iter   14:  η = 0.000912
+execute_psf: 3.8s  (modes=0.3  FFTLog=0.9  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 6.9s  (s9-7=0.0  s6=0.4  s5+4=5.2  s3+2=1.2)
+iter   15:  η = 0.001067
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.0  s6=0.7  s5+4=5.2  s3+2=1.4)
+iter   16:  η = 0.001434
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.5  synth=0.1)
+psf_adjoint: 8.4s  (s9-7=0.1  s6=0.8  s5+4=5.2  s3+2=2.4)
+iter   17:  η = 0.001497
+execute_psf: 4.0s  (modes=0.3  FFTLog=0.9  prop+graf=2.3  invHT=0.5  synth=0.0)
+psf_adjoint: 11.2s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=5.4)
+iter   18:  η = 0.001548
+execute_psf: 4.2s  (modes=0.3  FFTLog=0.9  prop+graf=2.3  invHT=0.7  synth=0.0)
+psf_adjoint: 8.9s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=3.0)
+iter   19:  η = 0.001593
+execute_psf: 4.1s  (modes=0.3  FFTLog=0.9  prop+graf=2.3  invHT=0.6  synth=0.0)
+psf_adjoint: 7.1s  (s9-7=0.1  s6=0.5  s5+4=5.5  s3+2=1.1)
+iter   20:  η = 0.001540
+  → saved phi & PSF snapshot
+execute_psf: 4.5s  (modes=0.3  FFTLog=0.9  prop+graf=2.8  invHT=0.5  synth=0.0)
+psf_adjoint: 6.9s  (s9-7=0.0  s6=0.5  s5+4=5.2  s3+2=1.2)
+iter   21:  η = 0.001628
+execute_psf: 4.9s  (modes=0.3  FFTLog=0.9  prop+graf=3.0  invHT=0.7  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.1  s6=0.5  s5+4=5.5  s3+2=1.2)
+iter   22:  η = 0.001652
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 10.4s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=4.6)
+iter   23:  η = 0.001663
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.6  synth=0.1)
+psf_adjoint: 9.4s  (s9-7=0.0  s6=0.5  s5+4=5.7  s3+2=3.1)
+iter   24:  η = 0.001658
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.3  prop+graf=2.0  invHT=0.5  synth=0.0)
+psf_adjoint: 9.8s  (s9-7=0.0  s6=0.5  s5+4=5.2  s3+2=4.1)
+iter   25:  η = 0.001678
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 9.1s  (s9-7=0.0  s6=0.4  s5+4=5.2  s3+2=3.4)
+iter   26:  η = 0.001657
+execute_psf: 3.7s  (modes=0.3  FFTLog=0.9  prop+graf=2.0  invHT=0.4  synth=0.0)
+psf_adjoint: 7.0s  (s9-7=0.0  s6=0.4  s5+4=5.2  s3+2=1.3)
+iter   27:  η = 0.001689
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.0  prop+graf=2.6  invHT=0.5  synth=0.0)
+psf_adjoint: 10.8s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=5.0)
+iter   28:  η = 0.001699
+execute_psf: 3.8s  (modes=0.3  FFTLog=1.0  prop+graf=2.0  invHT=0.5  synth=0.0)
+psf_adjoint: 7.1s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=1.2)
+iter   29:  η = 0.001710
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.0  prop+graf=2.4  invHT=0.5  synth=0.0)
+psf_adjoint: 8.9s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=3.1)
+iter   30:  η = 0.001717
+  → saved phi & PSF snapshot
+execute_psf: 3.7s  (modes=0.3  FFTLog=0.8  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 8.4s  (s9-7=0.0  s6=0.5  s5+4=5.4  s3+2=2.5)
+iter   31:  η = 0.001722
+execute_psf: 4.1s  (modes=0.3  FFTLog=0.8  prop+graf=2.5  invHT=0.5  synth=0.0)
+psf_adjoint: 7.1s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=1.3)
+iter   32:  η = 0.001725
+execute_psf: 5.1s  (modes=0.3  FFTLog=0.9  prop+graf=3.4  invHT=0.5  synth=0.0)
+psf_adjoint: 8.5s  (s9-7=0.0  s6=0.4  s5+4=5.5  s3+2=2.5)
+iter   33:  η = 0.001735
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.0  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 7.0s  (s9-7=0.0  s6=0.4  s5+4=5.3  s3+2=1.1)
+iter   34:  η = 0.001714
+execute_psf: 5.9s  (modes=0.3  FFTLog=1.1  prop+graf=4.0  invHT=0.5  synth=0.0)
+psf_adjoint: 9.2s  (s9-7=0.0  s6=0.7  s5+4=5.2  s3+2=3.2)
+iter   35:  η = 0.001720
+execute_psf: 5.0s  (modes=0.3  FFTLog=1.3  prop+graf=2.2  invHT=1.0  synth=0.2)
+psf_adjoint: 10.6s  (s9-7=0.2  s6=1.0  s5+4=5.3  s3+2=4.1)
+iter   36:  η = 0.001741
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.0  prop+graf=2.3  invHT=0.7  synth=0.1)
+psf_adjoint: 8.7s  (s9-7=0.1  s6=0.5  s5+4=5.3  s3+2=2.8)
+iter   37:  η = 0.001743
+execute_psf: 3.8s  (modes=0.3  FFTLog=0.8  prop+graf=2.1  invHT=0.5  synth=0.1)
+psf_adjoint: 9.4s  (s9-7=0.1  s6=1.0  s5+4=5.3  s3+2=3.0)
+iter   38:  η = 0.001746
+execute_psf: 3.7s  (modes=0.3  FFTLog=0.9  prop+graf=2.0  invHT=0.4  synth=0.0)
+psf_adjoint: 8.5s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=2.7)
+iter   39:  η = 0.001733
+execute_psf: 4.0s  (modes=0.3  FFTLog=0.9  prop+graf=2.4  invHT=0.5  synth=0.0)
+psf_adjoint: 7.5s  (s9-7=0.0  s6=0.4  s5+4=5.3  s3+2=1.8)
+iter   40:  η = 0.001751
+  → saved phi & PSF snapshot
+execute_psf: 4.0s  (modes=0.3  FFTLog=0.9  prop+graf=2.3  invHT=0.5  synth=0.0)
+psf_adjoint: 7.1s  (s9-7=0.0  s6=0.4  s5+4=5.4  s3+2=1.2)
+iter   41:  η = 0.001586
+execute_psf: 4.9s  (modes=0.3  FFTLog=1.0  prop+graf=2.8  invHT=0.7  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.1  s6=0.6  s5+4=5.5  s3+2=1.2)
+iter   42:  η = 0.001751
+execute_psf: 4.1s  (modes=0.3  FFTLog=0.9  prop+graf=2.2  invHT=0.6  synth=0.1)
+psf_adjoint: 8.8s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=2.8)
+iter   43:  η = 0.001752
+execute_psf: 4.8s  (modes=0.3  FFTLog=1.1  prop+graf=2.5  invHT=0.9  synth=0.1)
+psf_adjoint: 8.8s  (s9-7=0.1  s6=0.7  s5+4=5.4  s3+2=2.6)
+iter   44:  η = 0.001747
+execute_psf: 4.5s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.8  synth=0.1)
+psf_adjoint: 9.8s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=3.8)
+iter   45:  η = 0.001754
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.7  synth=0.0)
+psf_adjoint: 8.8s  (s9-7=0.1  s6=0.7  s5+4=5.2  s3+2=2.8)
+iter   46:  η = 0.001688
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.5  synth=0.1)
+psf_adjoint: 8.1s  (s9-7=0.0  s6=0.5  s5+4=5.5  s3+2=2.1)
+iter   47:  η = 0.001757
+execute_psf: 4.0s  (modes=0.3  FFTLog=0.9  prop+graf=2.2  invHT=0.5  synth=0.1)
+psf_adjoint: 8.6s  (s9-7=0.0  s6=0.7  s5+4=5.3  s3+2=2.6)
+iter   48:  η = 0.001752
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.0  prop+graf=2.1  invHT=0.7  synth=0.0)
+psf_adjoint: 8.9s  (s9-7=0.0  s6=0.4  s5+4=5.4  s3+2=3.0)
+iter   49:  η = 0.001758
+execute_psf: 4.5s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.8  synth=0.1)
+psf_adjoint: 8.4s  (s9-7=0.1  s6=0.9  s5+4=5.3  s3+2=2.1)
+iter   50:  η = 0.001758
+  → saved phi & PSF snapshot
+execute_psf: 4.7s  (modes=0.3  FFTLog=1.3  prop+graf=2.4  invHT=0.7  synth=0.1)
+psf_adjoint: 11.7s  (s9-7=0.1  s6=0.8  s5+4=5.2  s3+2=5.6)
+iter   51:  η = 0.001759
+execute_psf: 4.5s  (modes=0.3  FFTLog=1.3  prop+graf=2.1  invHT=0.8  synth=0.1)
+psf_adjoint: 8.1s  (s9-7=0.1  s6=0.7  s5+4=5.3  s3+2=1.9)
+iter   52:  η = 0.001759
+execute_psf: 4.6s  (modes=0.3  FFTLog=1.2  prop+graf=2.3  invHT=0.8  synth=0.1)
+psf_adjoint: 8.1s  (s9-7=0.1  s6=0.8  s5+4=5.3  s3+2=1.9)
+iter   53:  η = 0.001761
+execute_psf: 4.9s  (modes=0.3  FFTLog=1.2  prop+graf=2.6  invHT=0.7  synth=0.0)
+psf_adjoint: 10.1s  (s9-7=0.0  s6=0.6  s5+4=5.5  s3+2=4.0)
+iter   54:  η = 0.001752
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.8  synth=0.1)
+psf_adjoint: 9.0s  (s9-7=0.1  s6=0.7  s5+4=5.3  s3+2=2.9)
+iter   55:  η = 0.001763
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.5  synth=0.1)
+psf_adjoint: 8.1s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=2.2)
+iter   56:  η = 0.001734
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.0  prop+graf=2.3  invHT=0.8  synth=0.1)
+psf_adjoint: 10.2s  (s9-7=0.1  s6=0.7  s5+4=5.2  s3+2=4.2)
+iter   57:  η = 0.001763
+execute_psf: 4.1s  (modes=0.3  FFTLog=0.9  prop+graf=2.2  invHT=0.6  synth=0.1)
+psf_adjoint: 8.1s  (s9-7=0.0  s6=0.7  s5+4=5.3  s3+2=2.1)
+iter   58:  η = 0.001756
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.7  synth=0.0)
+psf_adjoint: 7.6s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=1.6)
+iter   59:  η = 0.001764
+execute_psf: 4.6s  (modes=0.3  FFTLog=1.1  prop+graf=2.4  invHT=0.8  synth=0.1)
+psf_adjoint: 11.9s  (s9-7=0.1  s6=0.8  s5+4=7.3  s3+2=3.6)
+iter   60:  η = 0.001764
+  → saved phi & PSF snapshot
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.7  synth=0.0)
+psf_adjoint: 7.7s  (s9-7=0.1  s6=0.8  s5+4=5.3  s3+2=1.5)
+iter   61:  η = 0.001764
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.8  synth=0.1)
+psf_adjoint: 8.7s  (s9-7=0.1  s6=0.8  s5+4=5.6  s3+2=2.2)
+iter   62:  η = 0.001764
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.0  prop+graf=2.1  invHT=0.7  synth=0.1)
+psf_adjoint: 9.7s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=3.8)
+iter   63:  η = 0.001758
+execute_psf: 4.0s  (modes=0.3  FFTLog=0.9  prop+graf=2.2  invHT=0.5  synth=0.1)
+psf_adjoint: 9.1s  (s9-7=0.1  s6=0.5  s5+4=5.2  s3+2=3.3)
+iter   64:  η = 0.001764
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.0  prop+graf=2.1  invHT=0.6  synth=0.1)
+psf_adjoint: 7.1s  (s9-7=0.1  s6=0.5  s5+4=5.3  s3+2=1.2)
+iter   65:  η = 0.001761
+execute_psf: 4.5s  (modes=0.3  FFTLog=1.4  prop+graf=2.1  invHT=0.6  synth=0.1)
+psf_adjoint: 10.4s  (s9-7=0.1  s6=0.7  s5+4=5.2  s3+2=4.4)
+iter   66:  η = 0.001764
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.7  synth=0.1)
+psf_adjoint: 8.7s  (s9-7=0.1  s6=0.7  s5+4=5.3  s3+2=2.6)
+iter   67:  η = 0.001764
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.7  synth=0.1)
+psf_adjoint: 9.0s  (s9-7=0.0  s6=0.6  s5+4=5.5  s3+2=2.9)
+iter   68:  η = 0.001764
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.6  synth=0.1)
+psf_adjoint: 10.0s  (s9-7=0.1  s6=0.8  s5+4=5.2  s3+2=3.9)
+iter   69:  η = 0.001764
+execute_psf: 4.7s  (modes=0.3  FFTLog=1.4  prop+graf=2.2  invHT=0.8  synth=0.0)
+psf_adjoint: 9.6s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=3.6)
+iter   70:  η = 0.001764
+  → saved phi & PSF snapshot
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.7  synth=0.0)
+psf_adjoint: 8.3s  (s9-7=0.1  s6=0.6  s5+4=5.5  s3+2=2.1)
+iter   71:  η = 0.001763
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.7  synth=0.1)
+psf_adjoint: 7.6s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=1.6)
+iter   72:  η = 0.001764
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.7  synth=0.0)
+psf_adjoint: 8.5s  (s9-7=0.1  s6=0.7  s5+4=5.3  s3+2=2.4)
+iter   73:  η = 0.001764
+execute_psf: 4.5s  (modes=0.3  FFTLog=1.3  prop+graf=2.2  invHT=0.7  synth=0.0)
+psf_adjoint: 7.4s  (s9-7=0.0  s6=0.6  s5+4=5.4  s3+2=1.4)
+iter   74:  η = 0.001764
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.7  synth=0.1)
+psf_adjoint: 9.0s  (s9-7=0.0  s6=0.5  s5+4=5.4  s3+2=3.1)
+iter   75:  η = 0.001764
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.5  synth=0.1)
+psf_adjoint: 9.4s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=3.5)
+iter   76:  η = 0.001764
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.6  synth=0.0)
+psf_adjoint: 7.6s  (s9-7=0.0  s6=0.6  s5+4=5.5  s3+2=1.5)
+iter   77:  η = 0.001764
+execute_psf: 4.7s  (modes=0.3  FFTLog=1.4  prop+graf=2.3  invHT=0.6  synth=0.1)
+psf_adjoint: 7.5s  (s9-7=0.1  s6=0.7  s5+4=5.4  s3+2=1.4)
+iter   78:  η = 0.001763
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.3  prop+graf=2.1  invHT=0.7  synth=0.1)
+psf_adjoint: 8.5s  (s9-7=0.0  s6=0.7  s5+4=5.5  s3+2=2.3)
+iter   79:  η = 0.001765
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.3  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.1  s6=0.5  s5+4=5.2  s3+2=1.5)
+iter   80:  η = 0.001746
+  → saved phi & PSF snapshot
+execute_psf: 4.5s  (modes=0.3  FFTLog=1.1  prop+graf=2.6  invHT=0.5  synth=0.0)
+psf_adjoint: 8.5s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=2.7)
+iter   81:  η = 0.001760
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 8.0s  (s9-7=0.1  s6=0.5  s5+4=5.3  s3+2=2.0)
+iter   82:  η = 0.001765
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.0  prop+graf=2.5  invHT=0.5  synth=0.1)
+psf_adjoint: 7.7s  (s9-7=0.0  s6=0.4  s5+4=5.9  s3+2=1.3)
+iter   83:  η = 0.001762
+execute_psf: 4.6s  (modes=0.3  FFTLog=1.0  prop+graf=2.6  invHT=0.6  synth=0.0)
+psf_adjoint: 7.8s  (s9-7=0.0  s6=0.7  s5+4=5.5  s3+2=1.6)
+iter   84:  η = 0.001765
+execute_psf: 5.1s  (modes=0.3  FFTLog=1.3  prop+graf=2.7  invHT=0.7  synth=0.1)
+psf_adjoint: 7.4s  (s9-7=0.1  s6=0.5  s5+4=5.3  s3+2=1.5)
+iter   85:  η = 0.001765
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.0  prop+graf=2.3  invHT=0.7  synth=0.1)
+psf_adjoint: 7.5s  (s9-7=0.1  s6=0.8  s5+4=5.3  s3+2=1.3)
+iter   86:  η = 0.001765
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.7  synth=0.1)
+psf_adjoint: 10.1s  (s9-7=0.1  s6=0.6  s5+4=5.5  s3+2=3.9)
+iter   87:  η = 0.001763
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.3  invHT=0.6  synth=0.0)
+psf_adjoint: 9.4s  (s9-7=0.1  s6=0.6  s5+4=5.3  s3+2=3.4)
+iter   88:  η = 0.001765
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 7.2s  (s9-7=0.0  s6=0.5  s5+4=5.4  s3+2=1.3)
+iter   89:  η = 0.001765
+execute_psf: 3.8s  (modes=0.3  FFTLog=0.9  prop+graf=2.1  invHT=0.4  synth=0.0)
+psf_adjoint: 8.7s  (s9-7=0.0  s6=0.4  s5+4=5.4  s3+2=2.8)
+iter   90:  η = 0.001765
+  → saved phi & PSF snapshot
+execute_psf: 3.7s  (modes=0.3  FFTLog=0.9  prop+graf=2.0  invHT=0.4  synth=0.0)
+psf_adjoint: 7.8s  (s9-7=0.0  s6=0.4  s5+4=5.3  s3+2=2.1)
+iter   91:  η = 0.001765
+execute_psf: 3.9s  (modes=0.3  FFTLog=1.0  prop+graf=2.1  invHT=0.4  synth=0.0)
+psf_adjoint: 7.0s  (s9-7=0.0  s6=0.4  s5+4=5.2  s3+2=1.4)
+iter   92:  η = 0.001765
+execute_psf: 4.8s  (modes=0.3  FFTLog=1.4  prop+graf=2.6  invHT=0.4  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.0  s6=0.4  s5+4=5.5  s3+2=1.3)
+iter   93:  η = 0.001765
+execute_psf: 3.9s  (modes=0.3  FFTLog=1.0  prop+graf=2.2  invHT=0.4  synth=0.0)
+psf_adjoint: 9.7s  (s9-7=0.0  s6=0.4  s5+4=5.4  s3+2=3.9)
+iter   94:  η = 0.001765
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.5  synth=0.1)
+psf_adjoint: 8.3s  (s9-7=0.0  s6=0.4  s5+4=5.4  s3+2=2.5)
+iter   95:  η = 0.001765
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.5  synth=0.0)
+psf_adjoint: 8.3s  (s9-7=0.0  s6=0.5  s5+4=5.4  s3+2=2.3)
+iter   96:  η = 0.001765
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.4  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.0  s6=0.4  s5+4=5.5  s3+2=1.4)
+iter   97:  η = 0.001765
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.4  synth=0.0)
+psf_adjoint: 8.2s  (s9-7=0.0  s6=0.4  s5+4=5.4  s3+2=2.4)
+iter   98:  η = 0.001765
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.4  synth=0.0)
+psf_adjoint: 9.2s  (s9-7=0.0  s6=0.4  s5+4=5.3  s3+2=3.5)
+iter   99:  η = 0.001765
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.4  synth=0.0)
+psf_adjoint: 8.0s  (s9-7=0.0  s6=0.4  s5+4=5.5  s3+2=2.1)
+iter  100:  η = 0.001765
+  → saved phi & PSF snapshot
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.2  prop+graf=2.3  invHT=0.4  synth=0.0)
+psf_adjoint: 8.4s  (s9-7=0.0  s6=0.5  s5+4=5.4  s3+2=2.4)
+iter  101:  η = 0.001765
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.2  prop+graf=2.1  invHT=0.6  synth=0.0)
+psf_adjoint: 7.3s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=1.4)
+iter  102:  η = 0.001765
+execute_psf: 4.2s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.6  synth=0.1)
+psf_adjoint: 8.3s  (s9-7=0.1  s6=0.4  s5+4=5.2  s3+2=2.6)
+iter  103:  η = 0.001765
+execute_psf: 4.4s  (modes=0.3  FFTLog=1.1  prop+graf=2.4  invHT=0.5  synth=0.1)
+psf_adjoint: 7.6s  (s9-7=0.1  s6=0.6  s5+4=5.5  s3+2=1.5)
+iter  104:  η = 0.001765
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.1  prop+graf=2.2  invHT=0.5  synth=0.0)
+psf_adjoint: 9.2s  (s9-7=0.1  s6=0.5  s5+4=5.4  s3+2=3.3)
+iter  105:  η = 0.001765
+execute_psf: 4.1s  (modes=0.3  FFTLog=1.2  prop+graf=2.2  invHT=0.4  synth=0.0)
+psf_adjoint: 7.5s  (s9-7=0.0  s6=0.5  s5+4=5.3  s3+2=1.6)
+iter  106:  η = 0.001765
+execute_psf: 4.3s  (modes=0.3  FFTLog=1.1  prop+graf=2.4  invHT=0.5  synth=0.0)
+psf_adjoint: 10.6s  (s9-7=0.1  s6=0.7  s5+4=5.2  s3+2=4.6)
+iter  107:  η = 0.001765
+execute_psf: 3.9s  (modes=0.3  FFTLog=1.1  prop+graf=2.0  invHT=0.4  synth=0.0)
+psf_adjoint: 8.2s  (s9-7=0.0  s6=0.4  s5+4=5.3  s3+2=2.5)
+iter  108:  η = 0.001765
+execute_psf: 3.9s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.4  synth=0.0)
+psf_adjoint: 9.7s  (s9-7=0.0  s6=0.4  s5+4=5.2  s3+2=4.0)
+iter  109:  η = 0.001765
+
+Optimization finished: FTOL_REACHED
+Final η = 0.001765
+execute_psf: 4.0s  (modes=0.3  FFTLog=1.1  prop+graf=2.1  invHT=0.4  synth=0.0)
+Saved: opt_results/phi_final.txt, opt_results/psf_final.png
