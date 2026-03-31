@@ -162,13 +162,14 @@ dL_dt1, dL_dt2 = psf_adjoint_doublet(plan, t1_vals, t2_vals, result, dL_dI)
 
 The same `PSFPlan` is reused — the only new parameter is `d_um`. The adjoint returns Wirtinger derivatives for both surfaces. FD-verified to ~1e-9 (small scale) and ~1e-5 (production).
 
-**Production performance** (R=1mm, M_max=6303, 768 threads):
+**Production performance** (R=1mm, M_max=6303, α=30°, NA=0.4):
 
-| Component | Time |
-|-----------|------|
-| Forward (execute_psf_doublet) | 4.7s |
-| Adjoint (psf_adjoint_doublet) | 6.8s |
-| Ratio (fwd+adj)/fwd | 1.86× |
+| Machine | Forward | Adjoint | Per iteration | 200 iters |
+|---------|---------|---------|---------------|-----------|
+| 350 threads | 1.6s | 3.0s | ~4.6s | ~15 min |
+| 768 threads | 4.7s | 6.8s | ~11.5s | ~38 min |
+
+The 350-thread machine is faster per-iteration due to better NUMA locality. The singlet at R=2mm on the same machine: forward 4.1s, adjoint 8.4s, ~12.5s/iter.
 
 **Physical note on doublet PSF shape:** For oblique incidence (α=30°), the singlet optimizer produces a PSF elongated horizontally (tangential direction, from coma). The doublet optimizer produces a PSF elongated vertically (sagittal direction). This is because the doublet's m-dependent filtering (from propagation between surfaces) can partially correct coma, compressing the tangential extent. The remaining dominant aberration is sagittal, so the spot flips from horizontal to vertical oval. The doublet η is significantly higher than the singlet — confirming coma correction is occurring. A rotationally symmetric system preserves m-mode power (fixed by the Jacobi-Anger expansion) but can apply m-dependent phase corrections. A single surface applies the same radial phase to all m (cannot correct coma). A doublet applies an effectively m-dependent radial filter via the inter-surface propagation, enabling partial coma correction — the same mechanism that thick refractive lenses use.
 
