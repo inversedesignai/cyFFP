@@ -2128,7 +2128,10 @@ if haskey(Base.loaded_modules, _CRC_PKGID)
                     Float64.(real.(Δ_I_raw))
                 end
                 dL_dt = psf_adjoint(plan, t_vals, result, dL_dI)
-                return ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(), dL_dt
+                # psf_adjoint returns the Wirtinger derivative ∂L/∂t̄.
+                # ChainRules cotangent convention: Δt = 2 ∂L/∂t̄  so that
+                #   δL = Re(conj(Δt) · δt).
+                return ChainRulesCore.NoTangent(), ChainRulesCore.NoTangent(), 2 .* dL_dt
             end
 
             return I_raw, psf_intensity_pullback

@@ -138,7 +138,7 @@ function run_adjoint_production(;
         delta = randn(ComplexF64, N_cells)
         delta ./= sqrt(sum(abs2.(delta)))
 
-        analytic = 2 * real(dot(g_zy, delta))
+        analytic = real(dot(g_zy, delta))
 
         Lp = loss(t0 .+ fd_eps .* delta)
         Lm = loss(t0 .- fd_eps .* delta)

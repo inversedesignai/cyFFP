@@ -280,6 +280,34 @@ function run_production_psf(;
 
     println("\n  All PSF checks PASSED ✓")
 
+    # ─── Power concentration check ───────────────────────────
+    # Near-field power: ∫|t(r)|² 2π r dr = π R² (since |t|=1)
+    P_near = π * R^2
+
+    # Far-field power on polar grid: ∫∫ I(ρ,ψ) ρ dρ dψ
+    # I_psf[ir, ip] = |u(ρ,ψ)|², on log-spaced ρ and uniform ψ
+    dpsi_val = 2π / N_psi
+    P_far = 0.0
+    for ip in 1:N_psi, ir in 1:Nr
+        P_far += I_psf[ir, ip] * rho[ir]^2 * dln * dpsi_val
+    end
+
+    # Power within one Airy radius (focal spot)
+    P_airy = 0.0
+    for ip in 1:N_psi, ir in 1:Nr
+        if rho[ir] <= rho_airy
+            P_airy += I_psf[ir, ip] * rho[ir]^2 * dln * dpsi_val
+        end
+    end
+
+    println("\n--- Power budget ---")
+    println("  P_nearfield     = $(round(P_near, sigdigits=6)) μm²  (π R²)")
+    println("  P_farfield      = $(round(P_far, sigdigits=6)) μm²  (∫ I ρ dρ dψ)")
+    println("  P_far / P_near  = $(round(P_far / P_near, sigdigits=6))  (Parseval check)")
+    println("  P_airy          = $(round(P_airy, sigdigits=6)) μm²  (ρ ≤ ρ_Airy)")
+    println("  P_airy / P_near = $(round(P_airy / P_near, sigdigits=6))  (concentration efficiency)")
+    println("  Airy theory     ≈ 0.84  (fraction within first zero)")
+
     # ─── Plots ───────────────────────────────────────────────
     if do_plots && HAS_PLOTS
         println("\n--- Generating plots ---")
