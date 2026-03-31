@@ -2101,7 +2101,11 @@ function execute_psf_doublet(plan::PSFPlan,
 
     # ── Propagation phases ──
     kz_vals = @. sqrt(complex(plan.k^2 - kr.^2))
+    # Intermediate propagation: hard cutoff on evanescent modes (kr > k).
+    # Evanescent modes don't reach the focal plane regardless, and including
+    # them worsens FFTLog round-trip accuracy without affecting the PSF.
     prop_d   = @. ifelse(kr < plan.k, exp(im * real(kz_vals) * d_um), zero(ComplexF64))
+    # Final propagation to focal plane: hard cutoff is fine (f-d >> λ)
     prop_f_d = @. ifelse(kr < plan.k, exp(im * real(kz_vals) * (plan.f_val - d_um)), zero(ComplexF64))
 
     # Output ρ-grid (same as r-grid by FFTLog self-reciprocity)

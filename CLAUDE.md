@@ -170,6 +170,8 @@ The same `PSFPlan` is reused — the only new parameter is `d_um`. The adjoint r
 | Adjoint (psf_adjoint_doublet) | 6.8s |
 | Ratio (fwd+adj)/fwd | 1.86× |
 
+**FFTLog round-trip accuracy:** The doublet pipeline relies on forward→inverse Hankel round-trips (one per mode between surfaces). The round-trip L² error is ~1e-4 per mode (verified in `test_hankel_roundtrip.jl`), with Parseval preserved exactly. At production scale (6303 modes), this accumulates to ~1-7% max pointwise error in the PSF vs the singlet (verified by running doublet with t₂=1, d≈0 in `test_doublet_sanity.jl`). Total power (sum of I_raw) matches to <0.01%. The intermediate propagation hard-zeros evanescent modes (kr > k) since they don't reach the focal plane; including them worsens round-trip accuracy without affecting the PSF.
+
 **Wirtinger convention note:** `psf_adjoint` and `psf_adjoint_doublet` return the Wirtinger derivative ∂L/∂t̄. For a real direction δt, the directional derivative is `2 Re(conj(∂L/∂t̄) · δt)`. The `psf_intensity` rrule for Zygote returns `2 × psf_adjoint(...)` to match ChainRules cotangent convention `δL = Re(conj(Δt) · δt)`.
 
 ### Differentiable PSF for Zygote (`psf_intensity`)
