@@ -39,6 +39,16 @@ julia test/test_adjoint_scaling.jl      # Scaling study M=53..1112
 # Production scale (needs ~37 GB for full M_max)
 julia -t auto test/test_production_aperture.jl
 julia -t auto test/test_production_psf.jl   # Ideal oblique + Neumann comparison
+
+# Hankel round-trip (prerequisite for doublet pipeline)
+julia -t auto test/test_hankel_roundtrip.jl  # L² err ~1e-4, Parseval exact
+
+# Doublet adjoint validation
+julia -t 4 test/test_adjoint_doublet.jl         # FD checks, 4 configs, rel err ~1e-9
+julia -t auto test/test_doublet_production.jl    # R=1mm production timing + FD check
+
+# Gradient check for φ-parameterized PSF (singlet)
+julia -t auto test/test_grad_phi.jl       # 12 trials, Zygote vs FD
 ```
 
 Start Julia with `-t N` for N threads. The module uses `Threads.@threads` for shared-memory parallelism (no Distributed).
@@ -54,6 +64,7 @@ Optional: `] add Plots` to generate PSF heatmap PNGs.
 - **QuadGK** - Numerical integration (tests only)
 - **Plots** (optional) - PSF heatmap generation
 - **ChainRulesCore**, **Zygote** (optional) - Automatic differentiation
+- **NLopt** (optional) - Optimization (CCSA/MMA) for optimize_psf scripts
 
 Install via Julia package manager: `] add FFTW SpecialFunctions QuadGK`
 
@@ -127,7 +138,39 @@ The adjoint adds only **~65%** overhead to the forward. 100 L-BFGS iterations: *
 
 **Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
 
-**Critical Julia pitfall (resolved):** Both `execute_psf` and `psf_adjoint` previously suffered from closure boxing. Writing `var = nothing` (e.g. `u_m = nothing`, `B_bar = nothing`) after a `@threads` loop in the same function causes Julia to infer the variable as `Union{T, Nothing}`, which forces the entire `@threads` closure to use boxed (heap-allocated, dynamically-dispatched) variable access. This turned every inner-loop operation from ~1ns to ~100ns. Impact: forward modes step 15s→0.2s; adjoint s5+4 226s→1.6s; adjoint s3+2 23s→0.6s. Fix: never reassign captured variables to `nothing` in the same function scope as `@threads`; just call `GC.gc()` and let the GC collect unreferenced arrays.
+### Doublet pipeline (`execute_psf_doublet`, `psf_adjoint_doublet`)
+
+For two rotationally symmetric metasurfaces t₁(r), t₂(r) separated by distance d. The pipeline inserts extra per-mode steps between FFTLog and prop+Graf:
+
+1. Mode construction: `u_m = i^m t₁(r) J_m(kₓr)`
+2. Forward Hankel → `raw₁`
+3. Propagate by d: `raw₁ *= exp(ikz d)` (kr cancellation: skip /kr and *kr)
+4. Inverse Hankel → `raw₂`
+5. Save `u_mid = raw₂/ρ` for adjoint; compute `g = t₂·raw₂` (ρ=r cancellation: skip /ρ and *r)
+6. Forward Hankel → `a_m_2 = raw₃/kr`
+7. Propagate by (f−d) + fused Graf shift (same as singlet)
+8. Steps 5-8: same as singlet
+
+Steps 1-6 are fused per-mode and threaded. The kr/kr and r/ρ cancellations (exploiting FFTLog grid self-reciprocity) eliminate 4 element-wise loops per mode in the forward and 3 in the adjoint.
+
+**Usage:**
+```julia
+plan = prepare_psf(pitch_um, N_cells; lambda_um=0.5, alpha_deg=30.0, NA=0.4)
+result = execute_psf_doublet(plan, t1_vals, t2_vals; d_um=200.0)
+dL_dt1, dL_dt2 = psf_adjoint_doublet(plan, t1_vals, t2_vals, result, dL_dI)
+```
+
+The same `PSFPlan` is reused — the only new parameter is `d_um`. The adjoint returns Wirtinger derivatives for both surfaces. FD-verified to ~1e-9 (small scale) and ~1e-5 (production).
+
+**Production performance** (R=1mm, M_max=6303, 768 threads):
+
+| Component | Time |
+|-----------|------|
+| Forward (execute_psf_doublet) | 4.7s |
+| Adjoint (psf_adjoint_doublet) | 6.8s |
+| Ratio (fwd+adj)/fwd | 1.86× |
+
+**Wirtinger convention note:** `psf_adjoint` and `psf_adjoint_doublet` return the Wirtinger derivative ∂L/∂t̄. For a real direction δt, the directional derivative is `2 Re(conj(∂L/∂t̄) · δt)`. The `psf_intensity` rrule for Zygote returns `2 × psf_adjoint(...)` to match ChainRules cotangent convention `δL = Re(conj(Δt) · δt)`.
 
 ### Differentiable PSF for Zygote (`psf_intensity`)
 
@@ -153,6 +196,27 @@ end, t_vals)[1]
 ```
 
 The rrule is defined automatically inside `cyffp.jl` when ChainRulesCore is detected as already loaded. No separate file needed. Zygote differentiates everything outside `psf_intensity` (loss composition, indexing, arithmetic) while the rrule routes the PSF gradient through `psf_adjoint`.
+
+### Phase optimization scripts
+
+**Singlet** (`optimize_psf.jl`): Maximizes focusing efficiency η = sum(I_raw·mask)·Δx²/(πR²) within the Airy disk for a single metasurface (R=2mm, α=30°, NA=0.4). Uses NLopt CCSA with manual adjoint gradients through the φ-parameterization t = exp(iφ).
+
+```bash
+julia -t auto optimize_psf.jl ideal           # start from ideal lens phase
+julia -t auto optimize_psf.jl quadratic       # coma-free quadratic phase
+julia -t auto optimize_psf.jl random [seed]   # random init
+julia -t auto optimize_psf.jl gradcheck ideal  # FD sanity check
+```
+
+**Doublet** (`optimize_psf_doublet.jl`): Joint optimization of (φ₁, φ₂) for two surfaces separated by d (R=1mm, same angle/NA). Optimization variable x = [φ₁; φ₂].
+
+```bash
+julia -t auto optimize_psf_doublet.jl 200 ideal uniform        # d=200μm
+julia -t auto optimize_psf_doublet.jl 500 quadratic quadratic  # d=500μm
+julia -t auto optimize_psf_doublet.jl gradcheck 200 ideal uniform
+```
+
+Both scripts save φ data and PSF heatmap PNGs every 10 iterations to `opt_results/` or `opt_doublet_results/`.
 
 ## Key Design Decisions
 
