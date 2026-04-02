@@ -1,1 +1,8 @@
 .claude/
+
+# Keep only final optimization results
+opt_results*/phi_[0-9]*.txt
+opt_results*/phi[12]_[0-9]*.txt
+opt_results*/psf_[0-9]*.png
+opt_doublet_results/phi[12]_[0-9]*.txt
+opt_doublet_results/psf_[0-9]*.png
