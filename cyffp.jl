@@ -1199,17 +1199,21 @@ function compute_psf(t_vals::Vector{ComplexF64},
         xv = x_um[ix]
         yv = y_um[iy]
         rv = sqrt(xv^2 + yv^2)
-        (rv < rho[1] || rv > rho[end]) && continue
+        rv > rho[end] && continue
 
         pv = atan(yv, xv)
         pv < 0 && (pv += 2π)
 
-        # Log-interpolate in ρ
-        lr  = log(rv)
-        lr0 = log(rho[1])
-        idx_r = (lr - lr0) / dln + 1.0
-        j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
-        wr = idx_r - j0
+        # Log-interpolate in ρ (clamp to rho[1] for rv < rho[1])
+        if rv < rho[1]
+            j0 = 1; wr = 0.0
+        else
+            lr  = log(rv)
+            lr0 = log(rho[1])
+            idx_r = (lr - lr0) / dln + 1.0
+            j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
+            wr = idx_r - j0
+        end
 
         # Linear interpolate in ψ (with wrap-around)
         idx_p = pv / dpsi + 1.0
@@ -1609,15 +1613,19 @@ function execute_psf(plan::PSFPlan, t_vals::Vector{ComplexF64})
         @inbounds for ix in 1:Nxy, iy in 1:Nxy
             xv = x_um[ix]; yv = y_um[iy]
             rv = sqrt(xv^2 + yv^2)
-            (rv < rho[1] || rv > rho[end]) && continue
+            rv > rho[end] && continue
 
             pv = atan(yv, xv)
             pv < 0 && (pv += 2π)
 
-            lr  = log(rv); lr0 = log(rho[1])
-            idx_r = (lr - lr0) / dln + 1.0
-            j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
-            wr = idx_r - j0
+            if rv < rho[1]
+                j0 = 1; wr = 0.0
+            else
+                lr  = log(rv); lr0 = log(rho[1])
+                idx_r = (lr - lr0) / dln + 1.0
+                j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
+                wr = idx_r - j0
+            end
 
             idx_p = pv / dpsi + 1.0
             p0    = clamp(floor(Int, idx_p), 1, plan.N_psi)
@@ -1796,15 +1804,19 @@ function psf_adjoint(plan::PSFPlan,
 
         xv = x_um[ix]; yv = y_um[iy]
         rv = sqrt(xv^2 + yv^2)
-        (rv < rho[1] || rv > rho[end]) && continue
+        rv > rho[end] && continue
 
         pv = atan(yv, xv)
         pv < 0 && (pv += 2π)
 
-        lr  = log(rv); lr0 = log(rho[1])
-        idx_r = (lr - lr0) / dln + 1.0
-        j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
-        wr = idx_r - j0
+        if rv < rho[1]
+            j0 = 1; wr = 0.0
+        else
+            lr  = log(rv); lr0 = log(rho[1])
+            idx_r = (lr - lr0) / dln + 1.0
+            j0 = clamp(floor(Int, idx_r), 1, Nr - 1)
+            wr = idx_r - j0
+        end
 
         idx_p = pv / dpsi + 1.0
         p0    = clamp(floor(Int, idx_p), 1, N_psi)
@@ -2231,12 +2243,16 @@ function execute_psf_doublet(plan::PSFPlan,
         @inbounds for ix in 1:Nxy, iy in 1:Nxy
             xv = x_um[ix]; yv = y_um[iy]
             rv = sqrt(xv^2 + yv^2)
-            (rv < rho_out[1] || rv > rho_out[end]) && continue
+            rv > rho_out[end] && continue
 
             pv = atan(yv, xv); pv < 0 && (pv += 2π)
-            lr = log(rv); lr0 = log(rho_out[1])
-            idx_r = (lr - lr0) / dln + 1.0
-            j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+            if rv < rho_out[1]
+                j0 = 1; wr = 0.0
+            else
+                lr = log(rv); lr0 = log(rho_out[1])
+                idx_r = (lr - lr0) / dln + 1.0
+                j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+            end
             idx_p = pv / dpsi + 1.0
             p0 = clamp(floor(Int, idx_p), 1, plan.N_psi)
             p1 = p0 == plan.N_psi ? 1 : p0 + 1; wp = idx_p - p0
@@ -2331,12 +2347,16 @@ function psf_adjoint_doublet(plan::PSFPlan,
     @inbounds for ix in 1:Nxy, iy in 1:Nxy
         xv = x_um[ix]; yv = y_um[iy]
         rv = sqrt(xv^2 + yv^2)
-        (rv < rho[1] || rv > rho[end]) && continue
+        rv > rho[end] && continue
 
         pv = atan(yv, xv); pv < 0 && (pv += 2π)
-        lr = log(rv); lr0 = log(rho[1])
-        idx_r = (lr - lr0) / dln + 1.0
-        j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+        if rv < rho[1]
+            j0 = 1; wr = 0.0
+        else
+            lr = log(rv); lr0 = log(rho[1])
+            idx_r = (lr - lr0) / dln + 1.0
+            j0 = clamp(floor(Int, idx_r), 1, Nr - 1); wr = idx_r - j0
+        end
         idx_p = pv / dpsi + 1.0
         p0 = clamp(floor(Int, idx_p), 1, N_psi)
         p1 = p0 == N_psi ? 1 : p0 + 1; wp = idx_p - p0
